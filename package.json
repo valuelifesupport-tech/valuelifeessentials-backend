@@ -1,0 +1,22 @@
+{
+  "name": "valuelifeessentials-backend",
+  "version": "1.0.0",
+  "description": "Express Node.js API Server for ValueLife Essentials",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "setup-mysql": "node hostinger-mysql.cjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "mysql2": "^3.23.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
