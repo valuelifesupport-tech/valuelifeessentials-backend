@@ -899,7 +899,7 @@ app.get('/api/products', (req, res) => {
            c.name as category_name, c.slug as category_slug,
            sc.name as subcategory_name, sc.slug as subcategory_slug,
            (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1) as thumbnail,
-           COALESCE((SELECT AVG(rating) FROM product_reviews WHERE product_id = p.id AND status = 'APPROVED'), 5.0) as avg_rating,
+           COALESCE((SELECT AVG(rating) FROM product_reviews WHERE product_id = p.id AND status = 'APPROVED'), 0) as avg_rating,
            (SELECT COUNT(id) FROM product_reviews WHERE product_id = p.id AND status = 'APPROVED') as review_count
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
@@ -1211,7 +1211,7 @@ app.get('/api/products/slug/:slug', (req, res) => {
 
   const ratingStats = db.prepare(`
     SELECT 
-      COALESCE(AVG(rating), 5.0) as avg_rating,
+      COALESCE(AVG(rating), 0) as avg_rating,
       COUNT(id) as total_reviews
     FROM product_reviews
     WHERE product_id = ? AND status = 'APPROVED'
@@ -1228,7 +1228,7 @@ app.get('/api/products/slug/:slug', (req, res) => {
       frequently_bought_products = db.prepare(`
         SELECT DISTINCT p.*, 
                COALESCE((SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1), p.thumbnail, p.image_url) as thumbnail,
-               COALESCE(AVG(r.rating), 4.8) as avg_rating,
+               COALESCE(AVG(r.rating), 0) as avg_rating,
                COUNT(r.id) as review_count
         FROM products p
         JOIN product_collections pc ON p.id = pc.product_id
@@ -1252,7 +1252,7 @@ app.get('/api/products/slug/:slug', (req, res) => {
       frequently_bought_products = db.prepare(`
         SELECT p.*, 
                COALESCE((SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1), p.thumbnail, p.image_url) as thumbnail,
-               COALESCE(AVG(r.rating), 4.8) as avg_rating,
+               COALESCE(AVG(r.rating), 0) as avg_rating,
                COUNT(r.id) as review_count
         FROM products p
         LEFT JOIN product_reviews r ON p.id = r.product_id AND r.status = 'APPROVED'
@@ -1269,7 +1269,7 @@ app.get('/api/products/slug/:slug', (req, res) => {
       frequently_bought_products = db.prepare(`
         SELECT p.*, 
                COALESCE((SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1), p.thumbnail, p.image_url) as thumbnail,
-               COALESCE(AVG(r.rating), 4.8) as avg_rating,
+               COALESCE(AVG(r.rating), 0) as avg_rating,
                COUNT(r.id) as review_count
         FROM products p
         LEFT JOIN product_reviews r ON p.id = r.product_id AND r.status = 'APPROVED'
@@ -1474,6 +1474,9 @@ app.post('/api/products', requireAdminAuth, (req, res) => {
 // Update Product
 app.put('/api/products/:id', requireAdminAuth, (req, res) => {
   const { id } = req.params;
+  const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'Product not found' });
+
   const { 
     title, sku: reqSku, category_id, subcategory_id, description, price_inr, price_usd, discount_inr, discount_usd, 
     compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd, barcode,
@@ -1490,10 +1493,16 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
     }
   }
   
-  const finalPriceInr = Number(price_inr || 0);
-  const finalPriceUsd = Number(price_usd || Math.round(finalPriceInr / 40));
-  const finalDiscInr = finalPriceInr;
-  const finalDiscUsd = finalPriceUsd;
+  const finalPriceInr = price_inr !== undefined ? Number(price_inr || 0) : existing.price_inr;
+  const finalPriceUsd = price_usd !== undefined ? Number(price_usd) : (price_inr !== undefined ? Number((finalPriceInr / 95).toFixed(2)) : existing.price_usd);
+  const finalDiscInr = discount_inr !== undefined ? Number(discount_inr) : (price_inr !== undefined ? finalPriceInr : existing.discount_inr);
+  const finalDiscUsd = discount_usd !== undefined ? Number(discount_usd) : (price_usd !== undefined ? finalPriceUsd : existing.discount_usd);
+  const finalStock = stock !== undefined && stock !== null && stock !== '' ? Number(stock) : existing.stock;
+  const finalTitle = title !== undefined ? title : existing.title;
+  const finalCategory = category_id !== undefined ? category_id : existing.category_id;
+  const finalSubcategory = subcategory_id !== undefined ? subcategory_id : existing.subcategory_id;
+  const finalDesc = description !== undefined ? description : existing.description;
+  const finalStatus = status !== undefined ? status : existing.status;
 
   db.prepare(`
     UPDATE products
@@ -1505,14 +1514,28 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
         frequently_bought_ids = ?, related_collection_ids = ?, related_mode = ?
     WHERE id = ?
   `).run(
-    title, reqSku ? reqSku.trim().toUpperCase() : null, category_id, subcategory_id || null, description, finalPriceInr, finalPriceUsd, 
+    finalTitle, reqSku ? reqSku.trim().toUpperCase() : null, finalCategory, finalSubcategory || null, finalDesc, finalPriceInr, finalPriceUsd, 
     finalDiscInr, finalDiscUsd,
-    compare_price_inr || null, compare_price_usd || null, cost_per_item_inr || null, cost_per_item_usd || null,
-    barcode || null, stock, status || 'Active', vendor || 'VALUELIFE ESSENTIALS', product_type || 'Garden Supplies',
-    tags || 'organic', weight || 0.5, hs_code || '310100', country_of_origin || 'India',
-    is_best_product ? 1 : 0, seo_keywords, typeof specs_json === 'object' ? JSON.stringify(specs_json) : specs_json,
-    gst_percent !== undefined && gst_percent !== '' ? Number(gst_percent) : null,
-    frequently_bought_ids || '', related_collection_ids || '', related_mode || 'PRODUCTS',
+    compare_price_inr !== undefined ? compare_price_inr : existing.compare_price_inr, 
+    compare_price_usd !== undefined ? compare_price_usd : existing.compare_price_usd, 
+    cost_per_item_inr !== undefined ? cost_per_item_inr : existing.cost_per_item_inr, 
+    cost_per_item_usd !== undefined ? cost_per_item_usd : existing.cost_per_item_usd,
+    barcode !== undefined ? barcode : existing.barcode, 
+    finalStock, 
+    finalStatus, 
+    vendor !== undefined ? vendor : existing.vendor, 
+    product_type !== undefined ? product_type : existing.product_type,
+    tags !== undefined ? tags : existing.tags, 
+    weight !== undefined ? weight : existing.weight, 
+    hs_code !== undefined ? hs_code : existing.hs_code, 
+    country_of_origin !== undefined ? country_of_origin : existing.country_of_origin,
+    is_best_product !== undefined ? (is_best_product ? 1 : 0) : existing.is_best_product, 
+    seo_keywords !== undefined ? seo_keywords : existing.seo_keywords, 
+    specs_json !== undefined ? (typeof specs_json === 'object' ? JSON.stringify(specs_json) : specs_json) : existing.specs_json,
+    gst_percent !== undefined && gst_percent !== '' ? Number(gst_percent) : existing.gst_percent,
+    frequently_bought_ids !== undefined ? frequently_bought_ids : existing.frequently_bought_ids, 
+    related_collection_ids !== undefined ? related_collection_ids : existing.related_collection_ids, 
+    related_mode !== undefined ? related_mode : existing.related_mode,
     id
   );
 
@@ -1864,11 +1887,17 @@ app.post('/api/orders', (req, res) => {
   }
 
   const rawTotal = Number(total_amount) || 0;
-  const safeTotal = (calculatedTotal > 0) ? calculatedTotal : rawTotal;
+  const safeTotal = rawTotal > 0 ? rawTotal : (calculatedTotal > 0 ? calculatedTotal : 0);
 
-  const depositRatio = (payment_mode === 'PARTIAL' || payment_mode === 'PARTIAL_COD') ? 0.20 : 1.0;
+  let depositRatio = 1.0;
+  if (payment_mode === 'PARTIAL' || payment_mode === 'PARTIAL_COD') {
+    depositRatio = 0.20;
+  } else if (payment_mode === 'COD' || payment_mode === '100%_COD') {
+    depositRatio = 0.0;
+  }
+
   let paidAmount = 0;
-  if (paid_amount !== undefined && paid_amount !== null && !isNaN(Number(paid_amount)) && Number(paid_amount) > 0) {
+  if (paid_amount !== undefined && paid_amount !== null && !isNaN(Number(paid_amount))) {
     paidAmount = Math.min(Number(paid_amount), safeTotal);
   } else {
     paidAmount = Math.round(safeTotal * depositRatio);
