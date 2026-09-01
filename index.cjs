@@ -1279,25 +1279,7 @@ app.get('/api/products/slug/:slug', (req, res) => {
     }
   }
 
-  // 3. Fallback ONLY if NO specific products or collections were defined (MAX 3 items from same category)
-  if (frequently_bought_products.length === 0 && !product.frequently_bought_ids && !product.related_collection_ids) {
-    try {
-      frequently_bought_products = db.prepare(`
-        SELECT p.*, 
-               COALESCE((SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1), p.thumbnail, p.image_url) as thumbnail,
-               COALESCE(AVG(r.rating), 0) as avg_rating,
-               COUNT(r.id) as review_count
-        FROM products p
-        LEFT JOIN product_reviews r ON p.id = r.product_id AND r.status = 'APPROVED'
-        WHERE p.category_id = ? AND p.id != ?
-        GROUP BY p.id
-        ORDER BY RANDOM()
-        LIMIT 3
-      `).all(product.category_id || 1, product.id);
-    } catch (e) {}
-  }
-
-  // Hard Cap at Max 4 Items Always!
+  // Hard Cap at Max 4 Items Always (STRICTLY ONLY EXPLICITLY CONFIGURED PRODUCTS)
   frequently_bought_products = frequently_bought_products.slice(0, 4);
 
   let finalPriceInr = Number(product.price_inr || product.price || 0);
