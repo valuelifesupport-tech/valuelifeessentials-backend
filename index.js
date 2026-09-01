@@ -1010,10 +1010,26 @@ app.get('/api/products', (req, res) => {
     const variants = variantsMap.get(p.id) || [];
     const collectionIds = colLinksMap.get(p.id) || [];
 
+    let finalPriceInr = Number(p.price_inr || p.price || 0);
+    let finalPriceUsd = Number(p.price_usd || 0);
+    let finalDiscountInr = Number(p.discount_inr || finalPriceInr || 0);
+    let finalDiscountUsd = Number(p.discount_usd || finalPriceUsd || 0);
+
+    if (finalPriceInr === 0 && variants.length > 0) {
+      finalPriceInr = Number(variants[0].price_inr || variants[0].price || 0);
+      finalPriceUsd = Number(variants[0].price_usd || (finalPriceInr > 0 ? Number((finalPriceInr / 95).toFixed(2)) : 0));
+      finalDiscountInr = Number(variants[0].discount_inr || finalPriceInr);
+      finalDiscountUsd = Number(variants[0].discount_usd || finalPriceUsd);
+    }
+
     return { 
       ...p, 
       title: cleanTitle,
       slug: cleanSlug,
+      price_inr: finalPriceInr,
+      price_usd: finalPriceUsd,
+      discount_inr: finalDiscountInr,
+      discount_usd: finalDiscountUsd,
       thumbnail: primaryImg,
       image_url: primaryImg,
       images: imagesList.length > 0 ? imagesList : (primaryImg ? [primaryImg] : []),
@@ -1284,8 +1300,33 @@ app.get('/api/products/slug/:slug', (req, res) => {
   // Hard Cap at Max 4 Items Always!
   frequently_bought_products = frequently_bought_products.slice(0, 4);
 
+  let finalPriceInr = Number(product.price_inr || product.price || 0);
+  let finalPriceUsd = Number(product.price_usd || 0);
+  let finalDiscountInr = Number(product.discount_inr || finalPriceInr || 0);
+  let finalDiscountUsd = Number(product.discount_usd || finalPriceUsd || 0);
+
+  if (finalPriceInr === 0 && variants.length > 0) {
+    finalPriceInr = Number(variants[0].price_inr || variants[0].price || 0);
+    finalPriceUsd = Number(variants[0].price_usd || (finalPriceInr > 0 ? Number((finalPriceInr / 95).toFixed(2)) : 0));
+    finalDiscountInr = Number(variants[0].discount_inr || finalPriceInr);
+    finalDiscountUsd = Number(variants[0].discount_usd || finalPriceUsd);
+  }
+
+  let parsedSpecs = null;
+  if (product.specs_json) {
+    try {
+      parsedSpecs = typeof product.specs_json === 'object' ? product.specs_json : JSON.parse(product.specs_json);
+    } catch (e) {
+      parsedSpecs = null;
+    }
+  }
+
   res.json({
     ...product,
+    price_inr: finalPriceInr,
+    price_usd: finalPriceUsd,
+    discount_inr: finalDiscountInr,
+    discount_usd: finalDiscountUsd,
     variants,
     images: imagesList,
     image_url: imagesList[0] || product.image_url || product.thumbnail || null,
@@ -1293,7 +1334,7 @@ app.get('/api/products/slug/:slug', (req, res) => {
     reviews: formattedReviews,
     ratingStats,
     frequently_bought_products,
-    specs: product.specs_json ? JSON.parse(product.specs_json) : null
+    specs: parsedSpecs
   });
 });
 
