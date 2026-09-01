@@ -1,0 +1,13 @@
+node_modules/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+database.sqlite
+ecommerce.db
+store.db
+fallback_db.json
+models/fallback_db.json
+uploads/
+public_html/uploads/
+.env
