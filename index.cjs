@@ -1521,7 +1521,11 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
   const finalDiscInr = discount_inr !== undefined ? Number(discount_inr) : (price_inr !== undefined ? finalPriceInr : existing.discount_inr);
   const finalDiscUsd = discount_usd !== undefined ? Number(discount_usd) : (price_usd !== undefined ? finalPriceUsd : existing.discount_usd);
   const finalStock = stock !== undefined && stock !== null && stock !== '' ? Number(stock) : existing.stock;
-  const finalTitle = title !== undefined ? title : existing.title;
+  const finalTitle = (title !== undefined && title !== null && String(title).trim() !== '') ? String(title).trim() : existing.title;
+  const finalSlug = (title !== undefined && title !== null && String(title).trim() !== '') 
+    ? String(title).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+    : existing.slug;
+  const finalSku = cleanReqSku || (reqSku && reqSku.trim() ? reqSku.trim().toUpperCase() : existing.sku);
   const finalCategory = category_id !== undefined ? category_id : existing.category_id;
   const finalSubcategory = subcategory_id !== undefined ? subcategory_id : existing.subcategory_id;
   const finalDesc = description !== undefined ? description : existing.description;
@@ -1529,7 +1533,7 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
 
   db.prepare(`
     UPDATE products
-    SET title = ?, sku = COALESCE(NULLIF(?, ''), sku), category_id = ?, subcategory_id = ?, description = ?, price_inr = ?, price_usd = ?, 
+    SET title = ?, slug = ?, sku = ?, category_id = ?, subcategory_id = ?, description = ?, price_inr = ?, price_usd = ?, 
         discount_inr = ?, discount_usd = ?, compare_price_inr = ?, compare_price_usd = ?,
         cost_per_item_inr = ?, cost_per_item_usd = ?, barcode = ?, stock = ?, status = ?, vendor = ?,
         product_type = ?, tags = ?, weight = ?, hs_code = ?, country_of_origin = ?,
@@ -1537,7 +1541,7 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
         frequently_bought_ids = ?, related_collection_ids = ?, related_mode = ?
     WHERE id = ?
   `).run(
-    finalTitle, reqSku ? reqSku.trim().toUpperCase() : null, finalCategory, finalSubcategory || null, finalDesc, finalPriceInr, finalPriceUsd, 
+    finalTitle, finalSlug, finalSku, finalCategory, finalSubcategory || null, finalDesc, finalPriceInr, finalPriceUsd, 
     finalDiscInr, finalDiscUsd,
     compare_price_inr !== undefined ? compare_price_inr : existing.compare_price_inr, 
     compare_price_usd !== undefined ? compare_price_usd : existing.compare_price_usd, 
