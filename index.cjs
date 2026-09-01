@@ -522,11 +522,15 @@ app.post('/api/media/replace', upload.single('image'), (req, res) => {
   try {
     const targetPrimaryPath = path.join(uploadsDir, targetFilename);
     const targetTmpPath = path.join(tmpUploadsDir, targetFilename);
+    const targetPubPath = path.join(publicHtmlUploadsDir, targetFilename);
 
     // Overwrite the file at targetPrimaryPath with newly uploaded file bytes
     fs.copyFileSync(req.file.path, targetPrimaryPath);
+    try { fs.copyFileSync(req.file.path, targetTmpPath); } catch (e) {}
     try {
-      fs.copyFileSync(req.file.path, targetTmpPath);
+      if (fs.existsSync(publicHtmlUploadsDir)) {
+        fs.copyFileSync(req.file.path, targetPubPath);
+      }
     } catch (e) {}
 
     // Clean up temporary upload file if different
