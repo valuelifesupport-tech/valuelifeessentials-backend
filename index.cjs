@@ -1599,8 +1599,8 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
     `);
     rawVariants.forEach(v => {
       if (!v) return;
-      const vName = v.variant_name || v.title || v.name || 'Standard Pack';
-      const vSku = v.sku || `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const vName = String(v.variant_name || v.title || v.name || 'Standard Pack').trim();
+      const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       const vPriceInr = Number(v.price_inr || v.price || finalPriceInr || 0);
       const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Number(v.price_usd) : Number((vPriceInr / 95).toFixed(2));
       const vDiscInr = (v.discount_inr && Number(v.discount_inr) > 0 && Number(v.discount_inr) < vPriceInr) ? Number(v.discount_inr) : vPriceInr;
