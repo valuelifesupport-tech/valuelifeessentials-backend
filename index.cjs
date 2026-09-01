@@ -3117,12 +3117,22 @@ app.get(['/api/filter-groups', '/api/admin/filter-groups'], (req, res) => {
 
 app.post('/api/admin/filter-groups', (req, res) => {
   const { name, filter_key, sort_order } = req.body;
-  const key = filter_key ? filter_key.toLowerCase().replace(/[^a-z0-9_]+/g, '_') : name.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Filter group name is required' });
+  
+  let key = filter_key && String(filter_key).trim() 
+    ? String(filter_key).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_') 
+    : String(name).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+  
   try {
-    const result = db.prepare('INSERT INTO product_filter_groups (name, filter_key, sort_order, is_active) VALUES (?, ?, ?, 1)').run(name, key, sort_order || 0);
-    res.status(201).json({ id: result.lastInsertRowid, message: 'Filter group created' });
+    const existing = db.prepare('SELECT id FROM product_filter_groups WHERE filter_key = ?').get(key);
+    if (existing) {
+      key = `${key}_${Date.now().toString().slice(-4)}`;
+    }
+    const result = db.prepare('INSERT INTO product_filter_groups (name, filter_key, sort_order, is_active) VALUES (?, ?, ?, 1)').run(String(name).trim(), key, sort_order || 0);
+    res.status(201).json({ id: result.lastInsertRowid, name: String(name).trim(), filter_key: key, message: 'Filter group created' });
   } catch (err) {
-    res.status(400).json({ error: 'Filter key already exists' });
+    console.error('Filter group insert error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
