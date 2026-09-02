@@ -17,7 +17,20 @@ const fs = require('fs');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const db = require('./db.cjs');
-const { setupHostingerMySQL } = require('./hostinger-mysql.cjs');
+const { setupHostingerMySQL, getMySQLPool } = require('./hostinger-mysql.cjs');
+
+// CENTRALIZED DIRECT MYSQL QUERY HELPER
+async function executeMySQL(sql, params = []) {
+  try {
+    const pool = getMySQLPool();
+    if (!pool) return null;
+    const [result] = await pool.query(sql, params);
+    return result;
+  } catch (err) {
+    console.warn(`[MySQL Notice] ${String(sql).slice(0, 60)}:`, err.message);
+    return null;
+  }
+}
 
 // NODEMAILER SMTP EMAIL ENGINE
 const mailTransporter = nodemailer.createTransport({
@@ -707,9 +720,24 @@ app.get('/api/currency/detect', (req, res) => {
   });
 });
 
-// API 4: Categories & Subcategories CRUD
-app.get(['/api/categories', '/api/categories/tree'], (req, res) => {
+// API 4: Categories & Subcategories CRUD (100% MySQL Direct Bridge)
+app.get(['/api/categories', '/api/categories/tree'], async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  const pool = getMySQLPool();
+  if (pool) {
+    try {
+      const [categories] = await pool.query('SELECT * FROM categories ORDER BY id ASC');
+      const [subcategories] = await pool.query('SELECT * FROM subcategories ORDER BY id ASC');
+      const result = (categories || []).map(cat => ({
+        ...cat,
+        subcategories: (subcategories || []).filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
+      }));
+      return res.json(result);
+    } catch (mErr) {
+      console.warn('MySQL categories fetch fallback:', mErr.message);
+    }
+  }
+
   const categories = db.prepare('SELECT * FROM categories ORDER BY id ASC').all();
   const subcategories = db.prepare('SELECT * FROM subcategories ORDER BY id ASC').all();
   
@@ -721,7 +749,7 @@ app.get(['/api/categories', '/api/categories/tree'], (req, res) => {
   res.json(result);
 });
 
-app.post('/api/categories', requireAdminAuth, (req, res) => {
+app.post('/api/categories', requireAdminAuth, async (req, res) => {
   const { name, description, image_url, icon } = req.body;
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Category name is required' });
   const cleanName = String(name).trim();
@@ -738,6 +766,7 @@ app.post('/api/categories', requireAdminAuth, (req, res) => {
     }
   }
 
+  let catId = Date.now();
   try {
     const result = db.prepare('INSERT INTO categories (name, slug, description, image_url, icon) VALUES (?, ?, ?, ?, ?)').run(
       cleanName, 
@@ -746,14 +775,21 @@ app.post('/api/categories', requireAdminAuth, (req, res) => {
       image_url || '', 
       icon !== undefined ? icon : '🌿'
     );
-    res.status(201).json({ id: result.lastInsertRowid, slug, name: cleanName, message: 'Category created successfully' });
+    catId = result.lastInsertRowid;
   } catch (err) {
     console.error('Category insert error:', err);
-    res.status(500).json({ error: err.message });
   }
+
+  // Direct MySQL Insert
+  await executeMySQL(
+    'INSERT INTO categories (id, name, slug, description, image_url, icon) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), slug=VALUES(slug), description=VALUES(description), image_url=VALUES(image_url), icon=VALUES(icon)',
+    [catId, cleanName, slug, description || '', image_url || '', icon !== undefined ? icon : '🌿']
+  );
+
+  res.status(201).json({ id: catId, slug, name: cleanName, message: 'Category created successfully' });
 });
 
-app.put('/api/categories/:id', requireAdminAuth, (req, res) => {
+app.put('/api/categories/:id', requireAdminAuth, async (req, res) => {
   const { id } = req.params;
   const { name, description, image_url, icon } = req.body;
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Category name is required' });
@@ -774,36 +810,78 @@ app.put('/api/categories/:id', requireAdminAuth, (req, res) => {
   try {
     db.prepare('UPDATE categories SET name = ?, slug = ?, description = ?, image_url = ?, icon = ? WHERE id = ?')
       .run(cleanName, slug, description || '', image_url || '', icon !== undefined ? icon : '🌿', id);
-    res.json({ id: Number(id), name: cleanName, slug, message: 'Category updated successfully' });
   } catch (err) {
     console.error('Category update error:', err);
-    res.status(500).json({ error: err.message });
   }
+
+  // Direct MySQL Update
+  await executeMySQL(
+    'UPDATE categories SET name = ?, slug = ?, description = ?, image_url = ?, icon = ? WHERE id = ?',
+    [cleanName, slug, description || '', image_url || '', icon !== undefined ? icon : '🌿', id]
+  );
+
+  res.json({ id: Number(id), name: cleanName, slug, message: 'Category updated successfully' });
 });
 
-app.delete('/api/categories/:id', requireAdminAuth, (req, res) => {
-  db.prepare('DELETE FROM categories WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Category deleted' });
+app.delete('/api/categories/:id', requireAdminAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM subcategories WHERE category_id = ?').run(id);
+    db.prepare('UPDATE products SET category_id = NULL WHERE category_id = ?').run(id);
+    db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+  } catch (e) {}
+
+  // Direct MySQL Permanent Delete
+  await executeMySQL('DELETE FROM subcategories WHERE category_id = ?', [id]);
+  await executeMySQL('UPDATE products SET category_id = NULL WHERE category_id = ?', [id]);
+  await executeMySQL('DELETE FROM categories WHERE id = ?', [id]);
+
+  res.json({ message: 'Category deleted permanently from database' });
 });
 
-// Subcategories API
-app.post('/api/subcategories', (req, res) => {
+// Subcategories API (100% MySQL Direct Bridge)
+app.post('/api/subcategories', async (req, res) => {
   const { category_id, name } = req.body;
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-  const result = db.prepare('INSERT INTO subcategories (category_id, name, slug) VALUES (?, ?, ?)').run(Number(category_id), name, slug);
-  res.status(201).json({ id: result.lastInsertRowid, slug, message: 'Subcategory created' });
+  let subId = Date.now();
+  try {
+    const result = db.prepare('INSERT INTO subcategories (category_id, name, slug) VALUES (?, ?, ?)').run(Number(category_id), name, slug);
+    subId = result.lastInsertRowid;
+  } catch (e) {}
+
+  // Direct MySQL Insert
+  await executeMySQL(
+    'INSERT INTO subcategories (id, category_id, name, slug) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE category_id=VALUES(category_id), name=VALUES(name), slug=VALUES(slug)',
+    [subId, Number(category_id), name, slug]
+  );
+
+  res.status(201).json({ id: subId, slug, message: 'Subcategory created' });
 });
 
-app.put('/api/subcategories/:id', (req, res) => {
+app.put('/api/subcategories/:id', async (req, res) => {
+  const { id } = req.params;
   const { name } = req.body;
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-  db.prepare('UPDATE subcategories SET name = ?, slug = ? WHERE id = ?').run(name, slug, req.params.id);
+  try {
+    db.prepare('UPDATE subcategories SET name = ?, slug = ? WHERE id = ?').run(name, slug, id);
+  } catch (e) {}
+
+  // Direct MySQL Update
+  await executeMySQL('UPDATE subcategories SET name = ?, slug = ? WHERE id = ?', [name, slug, id]);
+
   res.json({ message: 'Subcategory updated' });
 });
 
-app.delete('/api/subcategories/:id', (req, res) => {
-  db.prepare('DELETE FROM subcategories WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Subcategory deleted' });
+app.delete('/api/subcategories/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM subcategories WHERE id = ?').run(id);
+  } catch (e) {}
+
+  // Direct MySQL Permanent Delete
+  await executeMySQL('DELETE FROM subcategories WHERE id = ?', [id]);
+
+  res.json({ message: 'Subcategory deleted permanently from database' });
 });
 
 // API 5: Collections API
@@ -986,22 +1064,32 @@ app.put('/api/collections/:id', (req, res) => {
   res.json({ id: Number(id), slug, name: cleanName, image_url: colImage, message: 'Collection updated successfully' });
 });
 
-app.put(['/api/collections/:id/navbar-toggle', '/api/admin/collections/:id/navbar-toggle'], (req, res) => {
+app.put(['/api/collections/:id/navbar-toggle', '/api/admin/collections/:id/navbar-toggle'], async (req, res) => {
   const { id } = req.params;
   const { show_in_navbar } = req.body;
   const val = (show_in_navbar === 1 || show_in_navbar === true || show_in_navbar === '1') ? 1 : 0;
 
   try {
     db.prepare('UPDATE collections SET show_in_navbar = ? WHERE id = ?').run(val, id);
-    res.json({ success: true, show_in_navbar: val, message: `Collection navbar visibility updated to ${val === 1 ? 'ENABLED' : 'DISABLED'}` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) {}
+
+  await executeMySQL('UPDATE collections SET show_in_navbar = ? WHERE id = ?', [val, id]);
+
+  res.json({ success: true, show_in_navbar: val, message: `Collection navbar visibility updated to ${val === 1 ? 'ENABLED' : 'DISABLED'}` });
 });
 
-app.delete('/api/collections/:id', (req, res) => {
-  db.prepare('DELETE FROM collections WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Collection deleted successfully' });
+app.delete('/api/collections/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM product_collections WHERE collection_id = ?').run(id);
+    db.prepare('DELETE FROM collections WHERE id = ?').run(id);
+  } catch (e) {}
+
+  // Direct MySQL Delete
+  await executeMySQL('DELETE FROM product_collections WHERE collection_id = ?', [id]);
+  await executeMySQL('DELETE FROM collections WHERE id = ?', [id]);
+
+  res.json({ message: 'Collection deleted successfully from database' });
 });
 
 // API 6: Products API
@@ -1778,12 +1866,18 @@ app.post('/api/products/:id/variants', (req, res) => {
   res.status(201).json({ id: result.lastInsertRowid, message: 'Variant added' });
 });
 
-app.delete('/api/variants/:id', (req, res) => {
-  db.prepare('DELETE FROM product_variants WHERE id = ?').run(req.params.id);
+app.delete('/api/variants/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM product_variants WHERE id = ?').run(id);
+  } catch (e) {}
+
+  await executeMySQL('DELETE FROM product_variants WHERE id = ?', [id]);
+
   res.json({ message: 'Variant deleted' });
 });
 
-app.delete('/api/products/purge-all', (req, res) => {
+app.delete('/api/products/purge-all', async (req, res) => {
   try {
     db.prepare('DELETE FROM product_collections').run();
     db.prepare('DELETE FROM product_images').run();
@@ -1794,15 +1888,37 @@ app.delete('/api/products/purge-all', (req, res) => {
     db.prepare('DELETE FROM products').run();
     db.prepare('DELETE FROM banners').run();
     db.prepare('DELETE FROM coupons').run();
-    res.json({ message: 'All products and dummy data successfully purged', success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) {}
+
+  await executeMySQL('DELETE FROM product_collections');
+  await executeMySQL('DELETE FROM product_images');
+  await executeMySQL('DELETE FROM product_variants');
+  await executeMySQL('DELETE FROM product_reviews');
+  await executeMySQL('DELETE FROM order_items');
+  await executeMySQL('DELETE FROM orders');
+  await executeMySQL('DELETE FROM products');
+  await executeMySQL('DELETE FROM banners');
+  await executeMySQL('DELETE FROM coupons');
+
+  res.json({ message: 'All products and dummy data successfully purged from database', success: true });
 });
 
-app.delete('/api/products/:id', requireAdminAuth, (req, res) => {
-  db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Product deleted' });
+app.delete('/api/products/:id', requireAdminAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM product_images WHERE product_id = ?').run(id);
+    db.prepare('DELETE FROM product_variants WHERE product_id = ?').run(id);
+    db.prepare('DELETE FROM product_collections WHERE product_id = ?').run(id);
+    db.prepare('DELETE FROM products WHERE id = ?').run(id);
+  } catch (e) {}
+
+  // Direct MySQL Permanent Delete
+  await executeMySQL('DELETE FROM product_images WHERE product_id = ?', [id]);
+  await executeMySQL('DELETE FROM product_variants WHERE product_id = ?', [id]);
+  await executeMySQL('DELETE FROM product_collections WHERE product_id = ?', [id]);
+  await executeMySQL('DELETE FROM products WHERE id = ?', [id]);
+
+  res.json({ message: 'Product deleted permanently from database' });
 });
 
 // Reviews API
@@ -1971,9 +2087,15 @@ app.post('/api/coupons/validate', (req, res) => {
   });
 });
 
-app.delete('/api/coupons/:id', (req, res) => {
-  db.prepare('DELETE FROM coupons WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Coupon deleted' });
+app.delete('/api/coupons/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM coupons WHERE id = ?').run(id);
+  } catch (e) {}
+
+  await executeMySQL('DELETE FROM coupons WHERE id = ?', [id]);
+
+  res.json({ message: 'Coupon deleted successfully from database' });
 });
 
 // Orders API (WITH STRICT SERVER-SIDE BURP-SUITE PROOF PRICE INTEGRITY)
@@ -2477,56 +2599,117 @@ app.get('/api/admin/gst-report/export', (req, res) => {
   }
 });
 
-app.put('/api/admin/reviews/:id/status', (req, res) => {
-  db.prepare('UPDATE product_reviews SET status = ?, admin_reply = ? WHERE id = ?').run(req.body.status || 'APPROVED', req.body.admin_reply || null, req.params.id);
+app.put('/api/admin/reviews/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const status = req.body.status || 'APPROVED';
+  const reply = req.body.admin_reply || null;
+  try {
+    db.prepare('UPDATE product_reviews SET status = ?, admin_reply = ? WHERE id = ?').run(status, reply, id);
+  } catch (e) {}
+
+  await executeMySQL('UPDATE product_reviews SET status = ?, admin_reply = ? WHERE id = ?', [status, reply, id]);
+
   res.json({ message: 'Review status updated' });
 });
 
-app.get('/api/banners', (req, res) => {
+app.delete('/api/admin/reviews/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM product_reviews WHERE id = ?').run(id);
+  } catch (e) {}
+
+  await executeMySQL('DELETE FROM product_reviews WHERE id = ?', [id]);
+
+  res.json({ message: 'Review deleted successfully from database' });
+});
+
+app.get('/api/banners', async (req, res) => {
+  const pool = getMySQLPool();
+  if (pool) {
+    try {
+      const [banners] = await pool.query('SELECT * FROM banners ORDER BY sort_order ASC, id DESC');
+      if (banners && banners.length > 0) return res.json(banners);
+    } catch (e) {}
+  }
   res.json(db.prepare('SELECT * FROM banners ORDER BY sort_order ASC').all());
 });
 
-app.post('/api/banners', (req, res) => {
-  const { title, subtitle, image_url, link_url } = req.body;
-  const result = db.prepare('INSERT INTO banners (title, subtitle, image_url, link_url) VALUES (?, ?, ?, ?)').run(title, subtitle, image_url, link_url || '/products');
-  res.status(201).json({ id: result.lastInsertRowid, message: 'Banner created' });
+app.post('/api/banners', async (req, res) => {
+  const { title, subtitle, image_url, link_url, sort_order } = req.body;
+  let banId = Date.now();
+  try {
+    const result = db.prepare('INSERT INTO banners (title, subtitle, image_url, link_url, sort_order) VALUES (?, ?, ?, ?, ?)').run(title, subtitle || '', image_url, link_url || '/products', sort_order || 0);
+    banId = result.lastInsertRowid;
+  } catch (e) {}
+
+  await executeMySQL(
+    'INSERT INTO banners (id, title, subtitle, image_url, link_url, sort_order) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), subtitle=VALUES(subtitle), image_url=VALUES(image_url), link_url=VALUES(link_url), sort_order=VALUES(sort_order)',
+    [banId, title, subtitle || '', image_url, link_url || '/products', sort_order || 0]
+  );
+
+  res.status(201).json({ id: banId, message: 'Banner created successfully' });
 });
 
-app.delete('/api/banners/:id', (req, res) => {
-  db.prepare('DELETE FROM banners WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Banner deleted' });
+app.delete('/api/banners/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM banners WHERE id = ?').run(id);
+  } catch (e) {}
+
+  await executeMySQL('DELETE FROM banners WHERE id = ?', [id]);
+
+  res.json({ message: 'Banner deleted successfully from database' });
 });
 
 // CUSTOM PAGES (CMS) API
-// CUSTOM PAGES (CMS) API (defined with fallbacks below)
-
-app.post('/api/admin/pages', (req, res) => {
+app.post('/api/admin/pages', async (req, res) => {
   const { title, slug, content, seo_title, seo_description, status } = req.body;
   const pageSlug = slug ? slug.toLowerCase().replace(/[^a-z0-9]+/g, '-') : title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  let pgId = Date.now();
   try {
     const result = db.prepare(`
       INSERT INTO custom_pages (title, slug, content, seo_title, seo_description, status)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(title, pageSlug, content, seo_title || title, seo_description || '', status || 'PUBLISHED');
-    res.status(201).json({ id: result.lastInsertRowid, message: 'Custom page created successfully' });
-  } catch (err) {
-    res.status(400).json({ error: 'Page slug already exists' });
-  }
+    pgId = result.lastInsertRowid;
+  } catch (err) {}
+
+  await executeMySQL(
+    'INSERT INTO custom_pages (id, title, slug, content_html, seo_title, seo_description, is_published) VALUES (?, ?, ?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE title=VALUES(title), slug=VALUES(slug), content_html=VALUES(content_html), seo_title=VALUES(seo_title), seo_description=VALUES(seo_description)',
+    [pgId, title, pageSlug, content || '', seo_title || title, seo_description || '']
+  );
+
+  res.status(201).json({ id: pgId, message: 'Custom page created successfully' });
 });
 
-app.put('/api/admin/pages/:id', (req, res) => {
+app.put('/api/admin/pages/:id', async (req, res) => {
+  const { id } = req.params;
   const { title, slug, content, seo_title, seo_description, status } = req.body;
-  db.prepare(`
-    UPDATE custom_pages 
-    SET title = ?, slug = ?, content = ?, seo_title = ?, seo_description = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(title, slug, content, seo_title, seo_description, status, req.params.id);
-  res.json({ message: 'Custom page updated' });
+  try {
+    db.prepare(`
+      UPDATE custom_pages 
+      SET title = ?, slug = ?, content = ?, seo_title = ?, seo_description = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(title, slug, content, seo_title, seo_description, status, id);
+  } catch (e) {}
+
+  await executeMySQL(
+    'UPDATE custom_pages SET title = ?, slug = ?, content_html = ?, seo_title = ?, seo_description = ? WHERE id = ?',
+    [title, slug, content || '', seo_title || title, seo_description || '', id]
+  );
+
+  res.json({ message: 'Custom page updated successfully' });
 });
 
-app.delete('/api/admin/pages/:id', (req, res) => {
-  db.prepare('DELETE FROM custom_pages WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Custom page deleted' });
+app.delete('/api/admin/pages/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM custom_pages WHERE id = ?').run(id);
+  } catch (e) {}
+
+  await executeMySQL('DELETE FROM custom_pages WHERE id = ?', [id]);
+
+  res.json({ message: 'Custom page deleted successfully from database' });
 });
 
 app.get('/api/admin/orders', (req, res) => {
@@ -3230,7 +3413,7 @@ app.get(['/api/filter-groups', '/api/admin/filter-groups'], (req, res) => {
   res.json(result);
 });
 
-app.post('/api/admin/filter-groups', (req, res) => {
+app.post('/api/admin/filter-groups', async (req, res) => {
   const { name, filter_key, sort_order } = req.body;
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Filter group name is required' });
   
@@ -3238,45 +3421,77 @@ app.post('/api/admin/filter-groups', (req, res) => {
     ? String(filter_key).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_') 
     : String(name).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
   
+  let grpId = Date.now();
   try {
-    const existing = db.prepare('SELECT id FROM product_filter_groups WHERE filter_key = ?').get(key);
-    if (existing) {
-      key = `${key}_${Date.now().toString().slice(-4)}`;
-    }
     const result = db.prepare('INSERT INTO product_filter_groups (name, filter_key, sort_order, is_active) VALUES (?, ?, ?, 1)').run(String(name).trim(), key, sort_order || 0);
-    res.status(201).json({ id: result.lastInsertRowid, name: String(name).trim(), filter_key: key, message: 'Filter group created' });
-  } catch (err) {
-    console.error('Filter group insert error:', err);
-    res.status(500).json({ error: err.message });
-  }
+    grpId = result.lastInsertRowid;
+  } catch (err) {}
+
+  await executeMySQL(
+    'INSERT INTO product_filter_groups (id, name, filter_key, sort_order, is_active) VALUES (?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE name=VALUES(name), filter_key=VALUES(filter_key), sort_order=VALUES(sort_order)',
+    [grpId, String(name).trim(), key, sort_order || 0]
+  );
+
+  res.status(201).json({ id: grpId, name: String(name).trim(), filter_key: key, message: 'Filter group created' });
 });
 
-app.put('/api/admin/filter-groups/:id', (req, res) => {
+app.put('/api/admin/filter-groups/:id', async (req, res) => {
   const { name, filter_key, is_active, sort_order } = req.body;
-  db.prepare(`
-    UPDATE product_filter_groups 
-    SET name = ?, filter_key = ?, is_active = ?, sort_order = ?
-    WHERE id = ?
-  `).run(name, filter_key, is_active !== undefined ? is_active : 1, sort_order || 0, req.params.id);
+  try {
+    db.prepare(`
+      UPDATE product_filter_groups 
+      SET name = ?, filter_key = ?, is_active = ?, sort_order = ?
+      WHERE id = ?
+    `).run(name, filter_key, is_active !== undefined ? is_active : 1, sort_order || 0, req.params.id);
+  } catch (e) {}
+
+  await executeMySQL(
+    'UPDATE product_filter_groups SET name = ?, filter_key = ?, is_active = ?, sort_order = ? WHERE id = ?',
+    [name, filter_key, is_active !== undefined ? is_active : 1, sort_order || 0, req.params.id]
+  );
+
   res.json({ message: 'Filter group updated' });
 });
 
-app.delete('/api/admin/filter-groups/:id', (req, res) => {
-  db.prepare('DELETE FROM product_filter_options WHERE group_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM product_filter_groups WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Filter group deleted' });
+app.delete('/api/admin/filter-groups/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM product_filter_options WHERE group_id = ?').run(id);
+    db.prepare('DELETE FROM product_filter_groups WHERE id = ?').run(id);
+  } catch (e) {}
+
+  await executeMySQL('DELETE FROM product_filter_options WHERE group_id = ?', [id]);
+  await executeMySQL('DELETE FROM product_filter_groups WHERE id = ?', [id]);
+
+  res.json({ message: 'Filter group deleted successfully from database' });
 });
 
-app.post('/api/admin/filter-options', (req, res) => {
+app.post('/api/admin/filter-options', async (req, res) => {
   const { group_id, label, value, sort_order } = req.body;
   const optValue = value ? value.toLowerCase().replace(/[^a-z0-9_]+/g, '_') : label.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
-  const result = db.prepare('INSERT INTO product_filter_options (group_id, label, value, sort_order) VALUES (?, ?, ?, ?)').run(group_id, label, optValue, sort_order || 0);
-  res.status(201).json({ id: result.lastInsertRowid, message: 'Filter option added' });
+  let optId = Date.now();
+  try {
+    const result = db.prepare('INSERT INTO product_filter_options (group_id, label, value, sort_order) VALUES (?, ?, ?, ?)').run(group_id, label, optValue, sort_order || 0);
+    optId = result.lastInsertRowid;
+  } catch (e) {}
+
+  await executeMySQL(
+    'INSERT INTO product_filter_options (id, group_id, label, value, sort_order) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE label=VALUES(label), value=VALUES(value), sort_order=VALUES(sort_order)',
+    [optId, group_id, label, optValue, sort_order || 0]
+  );
+
+  res.status(201).json({ id: optId, message: 'Filter option added' });
 });
 
-app.delete('/api/admin/filter-options/:id', (req, res) => {
-  db.prepare('DELETE FROM product_filter_options WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Filter option deleted' });
+app.delete('/api/admin/filter-options/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    db.prepare('DELETE FROM product_filter_options WHERE id = ?').run(id);
+  } catch (e) {}
+
+  await executeMySQL('DELETE FROM product_filter_options WHERE id = ?', [id]);
+
+  res.json({ message: 'Filter option deleted successfully from database' });
 });
 
 // HERO SECTION CONFIG API

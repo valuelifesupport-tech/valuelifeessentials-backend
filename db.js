@@ -78,9 +78,9 @@ const defaultSubcategories = [
 ];
 
 let fallbackStore = {
-  categories: [...defaultCategories],
-  subcategories: [...defaultSubcategories],
-  collections: [...defaultCollections],
+  categories: [],
+  subcategories: [],
+  collections: [],
   products: [],
   product_variants: [],
   product_images: [],
@@ -105,9 +105,9 @@ try {
     const raw = fs.readFileSync(fallbackDbFile, 'utf8');
     const parsed = JSON.parse(raw);
     fallbackStore = { ...fallbackStore, ...parsed };
-    if (!Array.isArray(fallbackStore.categories)) fallbackStore.categories = [...defaultCategories];
-    if (!Array.isArray(fallbackStore.subcategories)) fallbackStore.subcategories = [...defaultSubcategories];
-    if (!Array.isArray(fallbackStore.collections)) fallbackStore.collections = [...defaultCollections];
+    if (!Array.isArray(fallbackStore.categories)) fallbackStore.categories = [];
+    if (!Array.isArray(fallbackStore.subcategories)) fallbackStore.subcategories = [];
+    if (!Array.isArray(fallbackStore.collections)) fallbackStore.collections = [];
     if (!fallbackStore.product_collections) fallbackStore.product_collections = [];
   } else {
     fs.writeFileSync(fallbackDbFile, JSON.stringify(fallbackStore, null, 2));
