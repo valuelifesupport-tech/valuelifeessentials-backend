@@ -617,7 +617,19 @@ app.post('/api/maintenance/verify', (req, res) => {
   res.status(401).json({ success: false, error: 'Invalid Maintenance Access Password' });
 });
 
-app.put('/api/settings', requireAdminAuth, (req, res) => {
+app.get('/api/settings', async (req, res) => {
+  const pool = getMySQLPool();
+  if (pool) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM store_settings WHERE id = 1');
+      if (rows && rows.length > 0) return res.json(rows[0]);
+    } catch (e) {}
+  }
+  const settings = db.prepare('SELECT * FROM store_settings WHERE id = 1').get();
+  res.json(settings || {});
+});
+
+app.put('/api/settings', requireAdminAuth, async (req, res) => {
   const { 
     announcement_text, announcement_code, contact_phone, contact_email, 
     partial_deposit_percent, enable_multi_currency, enable_cod, enable_partial_payment,
@@ -626,7 +638,36 @@ app.put('/api/settings', requireAdminAuth, (req, res) => {
     all_prices_include_tax, federal_tax_rate
   } = req.body;
   
-  db.prepare(`
+  try {
+    db.prepare(`
+      UPDATE store_settings
+      SET announcement_text = ?, announcement_code = ?, contact_phone = ?, contact_email = ?, 
+          partial_deposit_percent = ?, enable_multi_currency = ?, enable_cod = ?, enable_partial_payment = ?,
+          partial_payment_heading = ?, partial_payment_subtext = ?, prepaid_discount_percent = ?,
+          enable_gst = ?, gstin_number = ?, store_state = ?, default_gst_percent = ?, gst_type = ?, legal_business_name = ?,
+          all_prices_include_tax = ?, federal_tax_rate = ?
+      WHERE id = 1
+    `).run(
+      announcement_text, announcement_code, contact_phone, contact_email, 
+      partial_deposit_percent || 20, 
+      enable_multi_currency ? 1 : 0,
+      enable_cod !== undefined ? (enable_cod ? 1 : 0) : 1,
+      enable_partial_payment !== undefined ? (enable_partial_payment ? 1 : 0) : 1,
+      partial_payment_heading || 'Choose Payment Breakdown Option:',
+      partial_payment_subtext || 'Pay rest on Delivery',
+      prepaid_discount_percent || 0,
+      enable_gst !== undefined ? (enable_gst ? 1 : 0) : 1,
+      gstin_number || '27AAAAA0000A1Z5',
+      store_state || 'Maharashtra',
+      default_gst_percent || 5.0,
+      gst_type || 'INCLUSIVE',
+      legal_business_name || 'ValueLife Essentials Private Limited',
+      all_prices_include_tax !== undefined ? (all_prices_include_tax ? 1 : 0) : 1,
+      federal_tax_rate || 0.0
+    );
+  } catch (e) {}
+
+  await executeMySQL(`
     UPDATE store_settings
     SET announcement_text = ?, announcement_code = ?, contact_phone = ?, contact_email = ?, 
         partial_deposit_percent = ?, enable_multi_currency = ?, enable_cod = ?, enable_partial_payment = ?,
@@ -634,7 +675,7 @@ app.put('/api/settings', requireAdminAuth, (req, res) => {
         enable_gst = ?, gstin_number = ?, store_state = ?, default_gst_percent = ?, gst_type = ?, legal_business_name = ?,
         all_prices_include_tax = ?, federal_tax_rate = ?
     WHERE id = 1
-  `).run(
+  `, [
     announcement_text, announcement_code, contact_phone, contact_email, 
     partial_deposit_percent || 20, 
     enable_multi_currency ? 1 : 0,
@@ -651,8 +692,9 @@ app.put('/api/settings', requireAdminAuth, (req, res) => {
     legal_business_name || 'ValueLife Essentials Private Limited',
     all_prices_include_tax !== undefined ? (all_prices_include_tax ? 1 : 0) : 1,
     federal_tax_rate || 0.0
-  );
-  res.json({ message: 'Store settings updated successfully' });
+  ]);
+
+  res.json({ message: 'Store settings updated successfully in database' });
 });
 
 // GLOBAL ADMIN API SECURITY BARRIER - ALL /api/admin/* ENDPOINTS REQUIRE VALID ADMIN TOKEN
@@ -1569,7 +1611,7 @@ app.get('/api/check-sku', (req, res) => {
 });
 
 // Create Product with Shopify-style fields
-app.post('/api/products', requireAdminAuth, (req, res) => {
+app.post('/api/products', requireAdminAuth, async (req, res) => {
   const { 
     title, category_id, subcategory_id, description, price_inr, price_usd, discount_inr, discount_usd, 
     compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd, barcode,
@@ -1698,11 +1740,64 @@ app.post('/api/products', requireAdminAuth, (req, res) => {
     } catch (e) {}
   }
 
+  // Direct MySQL Insert Bridge
+  await executeMySQL(`
+    INSERT INTO products (
+      id, title, slug, sku, barcode, status, vendor, product_type, tags,
+      category_id, subcategory_id, description, price_inr, price_usd, discount_inr, discount_usd,
+      compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
+      stock, weight, hs_code, country_of_origin, is_best_product, meta_title, meta_description, seo_keywords,
+      specs_json, gst_percent, frequently_bought_ids, related_collection_ids, related_mode
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      title=VALUES(title), slug=VALUES(slug), sku=VALUES(sku), status=VALUES(status),
+      price_inr=VALUES(price_inr), price_usd=VALUES(price_usd), discount_inr=VALUES(discount_inr), discount_usd=VALUES(discount_usd),
+      stock=VALUES(stock), category_id=VALUES(category_id), subcategory_id=VALUES(subcategory_id)
+  `, [
+    productId, title, slug, sku, barcode || null, status || 'Active', vendor || 'VALUELIFE ESSENTIALS', product_type || 'Garden Supplies', cleanTags,
+    targetCategoryId, subcategory_id || null, description || '', 
+    cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd,
+    cleanCompInr, cleanCompUsd, cleanCostInr, cleanCostUsd,
+    cleanStock, Number(weight || 0.5), hs_code || '310100', country_of_origin || 'India',
+    is_best_product ? 1 : 0, title, description || '', cleanSeoKeywords, 
+    typeof specs_json === 'object' ? JSON.stringify(specs_json) : (specs_json || null),
+    gst_percent !== undefined && gst_percent !== '' && gst_percent !== null ? Number(gst_percent) : null,
+    frequently_bought_ids || '', related_collection_ids || '', related_mode || 'PRODUCTS'
+  ]);
+
+  if (cleanImages.length > 0) {
+    for (let i = 0; i < cleanImages.length; i++) {
+      await executeMySQL('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)', [productId, cleanImages[i], i === 0 ? 1 : 0]);
+    }
+  }
+
+  if (Array.isArray(rawVariants) && rawVariants.length > 0) {
+    for (const v of rawVariants) {
+      if (!v) continue;
+      const vName = String(v.variant_name || v.title || v.name || 'Standard Pack').trim();
+      const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const vPriceInr = Math.max(0, Number(v.price_inr || v.price || cleanPriceInr || 0));
+      const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Math.max(0, Number(v.price_usd)) : Number((vPriceInr / 95).toFixed(2));
+      const vDiscInr = Math.max(0, Number(v.discount_inr || v.discount || vPriceInr));
+      const vDiscUsd = (v.discount_usd !== undefined && v.discount_usd !== '' && Number(v.discount_usd) > 0) ? Math.max(0, Number(v.discount_usd)) : Number((vDiscInr / 95).toFixed(2));
+      const vStock = v.stock !== undefined && v.stock !== '' ? Math.max(0, Number(v.stock)) : 50;
+      let vImg = v.image_url || v.image || (cleanImages.length > 0 ? cleanImages[0] : null);
+      if (typeof vImg === 'object' && vImg?.image_url) vImg = vImg.image_url;
+      await executeMySQL('INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [productId, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vStock, vImg || null]);
+    }
+  }
+
+  if (Array.isArray(collection_ids) && collection_ids.length > 0) {
+    for (const cId of collection_ids) {
+      await executeMySQL('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)', [productId, Number(cId)]);
+    }
+  }
+
   res.status(201).json({ id: productId, slug, message: 'Product created successfully' });
 });
 
 // Update Product
-app.put('/api/products/:id', requireAdminAuth, (req, res) => {
+app.put('/api/products/:id', requireAdminAuth, async (req, res) => {
   const { id } = req.params;
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Product not found' });
@@ -1773,6 +1868,42 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
     id
   );
 
+  // Direct MySQL Update
+  await executeMySQL(`
+    UPDATE products
+    SET title = ?, slug = ?, sku = ?, category_id = ?, subcategory_id = ?, description = ?, price_inr = ?, price_usd = ?, 
+        discount_inr = ?, discount_usd = ?, compare_price_inr = ?, compare_price_usd = ?,
+        cost_per_item_inr = ?, cost_per_item_usd = ?, barcode = ?, stock = ?, status = ?, vendor = ?,
+        product_type = ?, tags = ?, weight = ?, hs_code = ?, country_of_origin = ?,
+        is_best_product = ?, seo_keywords = ?, specs_json = ?, gst_percent = ?,
+        frequently_bought_ids = ?, related_collection_ids = ?, related_mode = ?
+    WHERE id = ?
+  `, [
+    finalTitle, finalSlug, finalSku, finalCategory, finalSubcategory || null, finalDesc, finalPriceInr, finalPriceUsd, 
+    finalDiscInr, finalDiscUsd,
+    compare_price_inr !== undefined && compare_price_inr !== null && compare_price_inr !== '' ? Math.max(0, Number(compare_price_inr)) : existing.compare_price_inr, 
+    compare_price_usd !== undefined && compare_price_usd !== null && compare_price_usd !== '' ? Math.max(0, Number(compare_price_usd)) : existing.compare_price_usd, 
+    cost_per_item_inr !== undefined && cost_per_item_inr !== null && cost_per_item_inr !== '' ? Math.max(0, Number(cost_per_item_inr)) : existing.cost_per_item_inr, 
+    cost_per_item_usd !== undefined && cost_per_item_usd !== null && cost_per_item_usd !== '' ? Math.max(0, Number(cost_per_item_usd)) : existing.cost_per_item_usd,
+    barcode !== undefined ? barcode : existing.barcode, 
+    finalStock, 
+    finalStatus, 
+    vendor !== undefined ? vendor : existing.vendor, 
+    product_type !== undefined ? product_type : existing.product_type,
+    tags !== undefined ? tags : existing.tags, 
+    weight !== undefined ? weight : existing.weight, 
+    hs_code !== undefined ? hs_code : existing.hs_code, 
+    country_of_origin !== undefined ? country_of_origin : existing.country_of_origin,
+    is_best_product !== undefined ? (is_best_product ? 1 : 0) : existing.is_best_product, 
+    seo_keywords !== undefined ? seo_keywords : existing.seo_keywords, 
+    specs_json !== undefined ? (typeof specs_json === 'object' ? JSON.stringify(specs_json) : specs_json) : existing.specs_json,
+    gst_percent !== undefined && gst_percent !== '' ? Number(gst_percent) : existing.gst_percent,
+    frequently_bought_ids !== undefined ? frequently_bought_ids : existing.frequently_bought_ids, 
+    related_collection_ids !== undefined ? related_collection_ids : existing.related_collection_ids, 
+    related_mode !== undefined ? related_mode : existing.related_mode,
+    id
+  ]);
+
   const rawImages = req.body.images || req.body.product_images;
   if (rawImages && Array.isArray(rawImages)) {
     const cleanImages = rawImages
@@ -1786,9 +1917,14 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
       .filter(Boolean);
 
     db.prepare('DELETE FROM product_images WHERE product_id = ?').run(id);
+    await executeMySQL('DELETE FROM product_images WHERE product_id = ?', [id]);
+
     if (cleanImages.length > 0) {
       const imgStmt = db.prepare('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)');
       cleanImages.forEach((imgUrl, idx) => imgStmt.run(id, imgUrl, idx === 0 ? 1 : 0));
+      for (let i = 0; i < cleanImages.length; i++) {
+        await executeMySQL('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)', [id, cleanImages[i], i === 0 ? 1 : 0]);
+      }
       
       const primaryImg = cleanImages[0];
       try {
@@ -1800,12 +1936,14 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
   const rawVariants = variants || req.body.variants;
   if (rawVariants && Array.isArray(rawVariants)) {
     db.prepare('DELETE FROM product_variants WHERE product_id = ?').run(id);
+    await executeMySQL('DELETE FROM product_variants WHERE product_id = ?', [id]);
+
     const varStmt = db.prepare(`
       INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, compare_price_inr, compare_price_usd, stock, image_url)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    rawVariants.forEach(v => {
-      if (!v) return;
+    for (const v of rawVariants) {
+      if (!v) continue;
       const vName = String(v.variant_name || v.title || v.name || 'Standard Pack').trim();
       const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       const vPriceInr = Math.max(0, Number(v.price_inr || v.price || finalPriceInr || 0));
@@ -1819,21 +1957,24 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
       if (typeof vImg === 'object' && vImg?.image_url) vImg = vImg.image_url;
 
       varStmt.run(id, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vCompInr || null, vCompUsd || null, vStock, vImg || null);
-    });
+      await executeMySQL('INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vStock, vImg || null]);
+    }
   }
 
   const collection_ids = req.body.collection_ids || req.body.collectionIds;
   if (collection_ids && Array.isArray(collection_ids)) {
     try {
       db.prepare('DELETE FROM product_collections WHERE product_id = ?').run(id);
+      await executeMySQL('DELETE FROM product_collections WHERE product_id = ?', [id]);
       const pcStmt = db.prepare('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)');
-      collection_ids.forEach(cId => {
+      for (const cId of collection_ids) {
         try { pcStmt.run(id, Number(cId)); } catch (e) {}
-      });
+        await executeMySQL('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)', [id, Number(cId)]);
+      }
     } catch (e) {}
   }
 
-  res.json({ message: 'Product updated' });
+  res.json({ message: 'Product updated successfully in database' });
 });
 
 // Update Product Stock directly
@@ -3494,27 +3635,63 @@ app.delete('/api/admin/filter-options/:id', async (req, res) => {
   res.json({ message: 'Filter option deleted successfully from database' });
 });
 
-// HERO SECTION CONFIG API
-app.get('/api/hero-config', (req, res) => {
+// HERO SECTION CONFIG API (100% MySQL Direct Bridge)
+app.get('/api/hero-config', async (req, res) => {
+  const pool = getMySQLPool();
+  if (pool) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM store_hero_config WHERE id = 1');
+      if (rows && rows.length > 0) return res.json(rows[0]);
+    } catch (e) {}
+  }
   const config = db.prepare('SELECT * FROM store_hero_config WHERE id = 1').get();
   res.json(config || {});
 });
 
-app.put('/api/admin/hero-config', (req, res) => {
+app.put('/api/admin/hero-config', async (req, res) => {
   const { 
     hero_enabled, active_style, badge_text, title, subtitle, 
     primary_btn_text, primary_btn_link, secondary_btn_text, secondary_btn_link, 
     image_url, bg_image_url, card_1_title, card_1_sub, card_1_img, card_2_title, card_2_sub, card_2_img 
   } = req.body;
 
-  db.prepare(`
+  try {
+    db.prepare(`
+      UPDATE store_hero_config
+      SET hero_enabled = ?, active_style = ?, badge_text = ?, title = ?, subtitle = ?,
+          primary_btn_text = ?, primary_btn_link = ?, secondary_btn_text = ?, secondary_btn_link = ?,
+          image_url = ?, bg_image_url = ?, card_1_title = ?, card_1_sub = ?, card_1_img = ?,
+          card_2_title = ?, card_2_sub = ?, card_2_img = ?
+      WHERE id = 1
+    `).run(
+      hero_enabled !== undefined ? (hero_enabled ? 1 : 0) : 1,
+      active_style || 'SPLIT',
+      badge_text || '',
+      title || '',
+      subtitle || '',
+      primary_btn_text || '',
+      primary_btn_link || '',
+      secondary_btn_text || '',
+      secondary_btn_link || '',
+      image_url || '',
+      bg_image_url || '',
+      card_1_title || '',
+      card_1_sub || '',
+      card_1_img || '',
+      card_2_title || '',
+      card_2_sub || '',
+      card_2_img || ''
+    );
+  } catch (e) {}
+
+  await executeMySQL(`
     UPDATE store_hero_config
     SET hero_enabled = ?, active_style = ?, badge_text = ?, title = ?, subtitle = ?,
         primary_btn_text = ?, primary_btn_link = ?, secondary_btn_text = ?, secondary_btn_link = ?,
         image_url = ?, bg_image_url = ?, card_1_title = ?, card_1_sub = ?, card_1_img = ?,
         card_2_title = ?, card_2_sub = ?, card_2_img = ?
     WHERE id = 1
-  `).run(
+  `, [
     hero_enabled !== undefined ? (hero_enabled ? 1 : 0) : 1,
     active_style || 'SPLIT',
     badge_text || '',
@@ -3532,29 +3709,57 @@ app.put('/api/admin/hero-config', (req, res) => {
     card_2_title || '',
     card_2_sub || '',
     card_2_img || ''
-  );
+  ]);
 
-  res.json({ message: 'Hero configuration updated' });
+  res.json({ message: 'Hero configuration updated successfully in database' });
 });
 
-// API: Theme & Styling Config
-app.get('/api/theme-config', (req, res) => {
+// API: Theme & Styling Config (100% MySQL Direct Bridge)
+app.get('/api/theme-config', async (req, res) => {
+  const pool = getMySQLPool();
+  if (pool) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM store_theme_config WHERE id = 1');
+      if (rows && rows.length > 0) return res.json(rows[0]);
+    } catch (e) {}
+  }
   const config = db.prepare('SELECT * FROM store_theme_config WHERE id = 1').get();
   res.json(config || {});
 });
 
-app.put('/api/admin/theme-config', (req, res) => {
+app.put('/api/admin/theme-config', async (req, res) => {
   const { 
     active_preset, primary_color, primary_hover, secondary_color, accent_color,
     heading_font, body_font, border_radius, header_style, card_style, dark_mode
   } = req.body;
 
-  db.prepare(`
+  try {
+    db.prepare(`
+      UPDATE store_theme_config
+      SET active_preset = ?, primary_color = ?, primary_hover = ?, secondary_color = ?, accent_color = ?,
+          heading_font = ?, body_font = ?, border_radius = ?, header_style = ?, card_style = ?, dark_mode = ?
+      WHERE id = 1
+    `).run(
+      active_preset || 'EMERALD',
+      primary_color || '#3b6e14',
+      primary_hover || '#2e5710',
+      secondary_color || '#f8f7f2',
+      accent_color || '#f59e0b',
+      heading_font || 'Outfit',
+      body_font || 'Inter',
+      border_radius || 'rounded-3xl',
+      header_style || 'EMERALD_DARK',
+      card_style || 'VALUELIFE_ESSENTIALS',
+      dark_mode ? 1 : 0
+    );
+  } catch (e) {}
+
+  await executeMySQL(`
     UPDATE store_theme_config
     SET active_preset = ?, primary_color = ?, primary_hover = ?, secondary_color = ?, accent_color = ?,
         heading_font = ?, body_font = ?, border_radius = ?, header_style = ?, card_style = ?, dark_mode = ?
     WHERE id = 1
-  `).run(
+  `, [
     active_preset || 'EMERALD',
     primary_color || '#3b6e14',
     primary_hover || '#2e5710',
@@ -3566,23 +3771,25 @@ app.put('/api/admin/theme-config', (req, res) => {
     header_style || 'EMERALD_DARK',
     card_style || 'VALUELIFE_ESSENTIALS',
     dark_mode ? 1 : 0
-  );
+  ]);
 
-  res.json({ message: 'Theme configuration updated' });
+  res.json({ message: 'Theme configuration updated successfully in database' });
 });
 
-// API: Website Storefront Sections Manager API
-app.get('/api/sections-config', (req, res) => {
+// API: Website Storefront Sections Manager API (100% MySQL Direct Bridge)
+app.get(['/api/sections-config', '/api/admin/sections-config'], async (req, res) => {
+  const pool = getMySQLPool();
+  if (pool) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM store_sections_config WHERE id = 1');
+      if (rows && rows.length > 0) return res.json(rows[0]);
+    } catch (e) {}
+  }
   const config = db.prepare('SELECT * FROM store_sections_config WHERE id = 1').get();
   res.json(config || {});
 });
 
-app.get('/api/admin/sections-config', (req, res) => {
-  const config = db.prepare('SELECT * FROM store_sections_config WHERE id = 1').get();
-  res.json(config || {});
-});
-
-app.put('/api/admin/sections-config', (req, res) => {
+app.put(['/api/sections-config', '/api/admin/sections-config'], async (req, res) => {
   const { 
     show_announcement, show_hero, show_trust_badges, show_promo_banners,
     show_categories_slider, show_bestsellers, show_catalog_grid, show_footer,
@@ -3592,7 +3799,43 @@ app.put('/api/admin/sections-config', (req, res) => {
     category_slider_title, bestsellers_title, bestsellers_badge, bestsellers_count
   } = req.body;
 
-  db.prepare(`
+  try {
+    db.prepare(`
+      UPDATE store_sections_config
+      SET show_announcement = ?, show_hero = ?, show_trust_badges = ?, show_promo_banners = ?,
+          show_categories_slider = ?, show_bestsellers = ?, show_catalog_grid = ?, show_footer = ?,
+          show_sales_ticker = ?, sales_ticker_json = ?,
+          trust_badge_1_title = ?, trust_badge_1_sub = ?, trust_badge_2_title = ?, trust_badge_2_sub = ?,
+          trust_badge_3_title = ?, trust_badge_3_sub = ?, trust_badge_4_title = ?, trust_badge_4_sub = ?,
+          category_slider_title = ?, bestsellers_title = ?, bestsellers_badge = ?, bestsellers_count = ?
+      WHERE id = 1
+    `).run(
+      show_announcement !== undefined ? (show_announcement ? 1 : 0) : 1,
+      show_hero !== undefined ? (show_hero ? 1 : 0) : 1,
+      show_trust_badges !== undefined ? (show_trust_badges ? 1 : 0) : 1,
+      show_promo_banners !== undefined ? (show_promo_banners ? 1 : 0) : 1,
+      show_categories_slider !== undefined ? (show_categories_slider ? 1 : 0) : 1,
+      show_bestsellers !== undefined ? (show_bestsellers ? 1 : 0) : 1,
+      show_catalog_grid !== undefined ? (show_catalog_grid ? 1 : 0) : 1,
+      show_footer !== undefined ? (show_footer ? 1 : 0) : 1,
+      show_sales_ticker !== undefined ? (show_sales_ticker ? 1 : 0) : 1,
+      typeof sales_ticker_json === 'string' ? sales_ticker_json : JSON.stringify(sales_ticker_json || []),
+      trust_badge_1_title || '100% Pure Organic',
+      trust_badge_1_sub || 'Chemical-free bio products',
+      trust_badge_2_title || 'Fast Home Delivery',
+      trust_badge_2_sub || 'Safe packaging across India',
+      trust_badge_3_title || 'Partial Payment & COD',
+      trust_badge_3_sub || 'Pay 20% deposit online',
+      trust_badge_4_title || 'Top Rated Service',
+      trust_badge_4_sub || '4.9 ★ Average Reviews',
+      category_slider_title || 'Shop By Categories',
+      bestsellers_title || '🔥 Best Seller Products',
+      bestsellers_badge || 'HIGH DEMAND ITEMS',
+      bestsellers_count || 8
+    );
+  } catch (e) {}
+
+  await executeMySQL(`
     UPDATE store_sections_config
     SET show_announcement = ?, show_hero = ?, show_trust_badges = ?, show_promo_banners = ?,
         show_categories_slider = ?, show_bestsellers = ?, show_catalog_grid = ?, show_footer = ?,
@@ -3601,7 +3844,7 @@ app.put('/api/admin/sections-config', (req, res) => {
         trust_badge_3_title = ?, trust_badge_3_sub = ?, trust_badge_4_title = ?, trust_badge_4_sub = ?,
         category_slider_title = ?, bestsellers_title = ?, bestsellers_badge = ?, bestsellers_count = ?
     WHERE id = 1
-  `).run(
+  `, [
     show_announcement !== undefined ? (show_announcement ? 1 : 0) : 1,
     show_hero !== undefined ? (show_hero ? 1 : 0) : 1,
     show_trust_badges !== undefined ? (show_trust_badges ? 1 : 0) : 1,
@@ -3624,56 +3867,9 @@ app.put('/api/admin/sections-config', (req, res) => {
     bestsellers_title || '🔥 Best Seller Products',
     bestsellers_badge || 'HIGH DEMAND ITEMS',
     bestsellers_count || 8
-  );
+  ]);
 
-  res.json({ message: 'Storefront sections configuration updated live' });
-});
-
-app.put('/api/sections-config', (req, res) => {
-  const { 
-    show_announcement, show_hero, show_trust_badges, show_promo_banners,
-    show_categories_slider, show_bestsellers, show_catalog_grid, show_footer,
-    show_sales_ticker, sales_ticker_json,
-    trust_badge_1_title, trust_badge_1_sub, trust_badge_2_title, trust_badge_2_sub,
-    trust_badge_3_title, trust_badge_3_sub, trust_badge_4_title, trust_badge_4_sub,
-    category_slider_title, bestsellers_title, bestsellers_badge, bestsellers_count
-  } = req.body;
-
-  db.prepare(`
-    UPDATE store_sections_config
-    SET show_announcement = ?, show_hero = ?, show_trust_badges = ?, show_promo_banners = ?,
-        show_categories_slider = ?, show_bestsellers = ?, show_catalog_grid = ?, show_footer = ?,
-        show_sales_ticker = ?, sales_ticker_json = ?,
-        trust_badge_1_title = ?, trust_badge_1_sub = ?, trust_badge_2_title = ?, trust_badge_2_sub = ?,
-        trust_badge_3_title = ?, trust_badge_3_sub = ?, trust_badge_4_title = ?, trust_badge_4_sub = ?,
-        category_slider_title = ?, bestsellers_title = ?, bestsellers_badge = ?, bestsellers_count = ?
-    WHERE id = 1
-  `).run(
-    show_announcement !== undefined ? (show_announcement ? 1 : 0) : 1,
-    show_hero !== undefined ? (show_hero ? 1 : 0) : 1,
-    show_trust_badges !== undefined ? (show_trust_badges ? 1 : 0) : 1,
-    show_promo_banners !== undefined ? (show_promo_banners ? 1 : 0) : 1,
-    show_categories_slider !== undefined ? (show_categories_slider ? 1 : 0) : 1,
-    show_bestsellers !== undefined ? (show_bestsellers ? 1 : 0) : 1,
-    show_catalog_grid !== undefined ? (show_catalog_grid ? 1 : 0) : 1,
-    show_footer !== undefined ? (show_footer ? 1 : 0) : 1,
-    show_sales_ticker !== undefined ? (show_sales_ticker ? 1 : 0) : 1,
-    typeof sales_ticker_json === 'string' ? sales_ticker_json : JSON.stringify(sales_ticker_json || []),
-    trust_badge_1_title || '100% Pure Organic',
-    trust_badge_1_sub || 'Chemical-free bio products',
-    trust_badge_2_title || 'Fast Home Delivery',
-    trust_badge_2_sub || 'Safe packaging across India',
-    trust_badge_3_title || 'Partial Payment & COD',
-    trust_badge_3_sub || 'Pay 20% deposit online',
-    trust_badge_4_title || 'Top Rated Service',
-    trust_badge_4_sub || '4.9 ★ Average Reviews',
-    category_slider_title || 'Shop By Categories',
-    bestsellers_title || '🔥 Best Seller Products',
-    bestsellers_badge || 'HIGH DEMAND ITEMS',
-    bestsellers_count || 8
-  );
-
-  res.json({ message: 'Storefront sections configuration updated live' });
+  res.json({ message: 'Storefront sections configuration updated successfully in database' });
 });
 
 // ==========================================
