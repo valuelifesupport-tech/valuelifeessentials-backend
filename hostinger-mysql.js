@@ -367,24 +367,32 @@ let poolInstance = null;
 
 function getMySQLPool() {
   if (poolInstance) return poolInstance;
-  let mysqlHost = process.env.MYSQL_HOST || '127.0.0.1';
-  if (mysqlHost === 'localhost') mysqlHost = '127.0.0.1';
+  let mysqlHost = process.env.MYSQL_HOST || 'srv831.hstgr.io';
+  if (mysqlHost === 'localhost') mysqlHost = 'srv831.hstgr.io';
 
-  if (!process.env.MYSQL_USER || !process.env.MYSQL_PASSWORD || !process.env.MYSQL_DATABASE) {
+  const user = process.env.MYSQL_USER || 'u439830852_admin';
+  const password = process.env.MYSQL_PASSWORD || 'Valuelife@support1';
+  const database = process.env.MYSQL_DATABASE || 'u439830852_valuelife';
+  const port = Number(process.env.MYSQL_PORT) || 3306;
+
+  try {
+    poolInstance = mysql.createPool({
+      host: mysqlHost,
+      user,
+      password,
+      database,
+      port,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      connectTimeout: 3000,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000
+    });
+  } catch (err) {
+    console.warn('MySQL pool create notice:', err.message);
     return null;
   }
-
-  poolInstance = mysql.createPool({
-    host: mysqlHost,
-    user: process.env.MYSQL_USER,
-    password: process.env.MYSQL_PASSWORD,
-    database: process.env.MYSQL_DATABASE,
-    port: Number(process.env.MYSQL_PORT) || 3306,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    connectTimeout: 8000
-  });
 
   return poolInstance;
 }

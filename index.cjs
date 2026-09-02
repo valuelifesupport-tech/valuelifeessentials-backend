@@ -19,12 +19,14 @@ const nodemailer = require('nodemailer');
 const db = require('./db.cjs');
 const { setupHostingerMySQL, getMySQLPool } = require('./hostinger-mysql.cjs');
 
-// CENTRALIZED DIRECT MYSQL QUERY HELPER
+// CENTRALIZED DIRECT MYSQL QUERY HELPER (WITH NON-BLOCKING FAST TIMEOUT)
 async function executeMySQL(sql, params = []) {
   try {
     const pool = getMySQLPool();
     if (!pool) return null;
-    const [result] = await pool.query(sql, params);
+    const queryPromise = pool.query(sql, params);
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MySQL Query Timeout')), 2500));
+    const [result] = await Promise.race([queryPromise, timeoutPromise]);
     return result;
   } catch (err) {
     console.warn(`[MySQL Notice] ${String(sql).slice(0, 60)}:`, err.message);
@@ -765,29 +767,23 @@ app.get('/api/currency/detect', (req, res) => {
 // API 4: Categories & Subcategories CRUD (100% MySQL Direct Bridge)
 app.get(['/api/categories', '/api/categories/tree'], async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  const pool = getMySQLPool();
-  if (pool) {
-    try {
-      const [categories] = await pool.query('SELECT * FROM categories ORDER BY id ASC');
-      const [subcategories] = await pool.query('SELECT * FROM subcategories ORDER BY id ASC');
-      const result = (categories || []).map(cat => ({
-        ...cat,
-        subcategories: (subcategories || []).filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
-      }));
-      return res.json(result);
-    } catch (mErr) {
-      console.warn('MySQL categories fetch fallback:', mErr.message);
-    }
+  const categories = await executeMySQL('SELECT * FROM categories ORDER BY id ASC');
+  const subcategories = await executeMySQL('SELECT * FROM subcategories ORDER BY id ASC');
+  
+  if (Array.isArray(categories) && categories.length > 0) {
+    const result = categories.map(cat => ({
+      ...cat,
+      subcategories: (Array.isArray(subcategories) ? subcategories : []).filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
+    }));
+    return res.json(result);
   }
 
-  const categories = db.prepare('SELECT * FROM categories ORDER BY id ASC').all();
-  const subcategories = db.prepare('SELECT * FROM subcategories ORDER BY id ASC').all();
-  
-  const result = categories.map(cat => ({
+  const fallbackCats = db.prepare('SELECT * FROM categories ORDER BY id ASC').all();
+  const fallbackSubs = db.prepare('SELECT * FROM subcategories ORDER BY id ASC').all();
+  const result = fallbackCats.map(cat => ({
     ...cat,
-    subcategories: subcategories.filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
+    subcategories: fallbackSubs.filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
   }));
-  
   res.json(result);
 });
 
