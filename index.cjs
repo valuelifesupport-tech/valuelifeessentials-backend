@@ -1505,12 +1505,22 @@ app.post('/api/products', requireAdminAuth, (req, res) => {
     } catch (e) {}
   }
 
+  const cleanPriceInr = Math.max(0, Number(price_inr || 0));
+  const cleanPriceUsd = price_usd !== undefined && price_usd !== null && price_usd !== '' && Number(price_usd) > 0 ? Math.max(0, Number(price_usd)) : Number((cleanPriceInr / 95).toFixed(2));
+  const cleanDiscInr = Math.max(0, Number(discount_inr || price_inr || 0));
+  const cleanDiscUsd = discount_usd !== undefined && discount_usd !== null && discount_usd !== '' && Number(discount_usd) > 0 ? Math.max(0, Number(discount_usd)) : Number((cleanDiscInr / 95).toFixed(2));
+  const cleanCompInr = compare_price_inr !== undefined && compare_price_inr !== null && compare_price_inr !== '' ? Math.max(0, Number(compare_price_inr)) : null;
+  const cleanCompUsd = compare_price_usd !== undefined && compare_price_usd !== null && compare_price_usd !== '' ? Math.max(0, Number(compare_price_usd)) : null;
+  const cleanCostInr = cost_per_item_inr !== undefined && cost_per_item_inr !== null && cost_per_item_inr !== '' ? Math.max(0, Number(cost_per_item_inr)) : null;
+  const cleanCostUsd = cost_per_item_usd !== undefined && cost_per_item_usd !== null && cost_per_item_usd !== '' ? Math.max(0, Number(cost_per_item_usd)) : null;
+  const cleanStock = Math.max(0, Number(stock || 100));
+
   const result = stmt.run(
     title, slug, sku, barcode || null, status || 'Active', vendor || 'VALUELIFE ESSENTIALS', product_type || 'Garden Supplies', cleanTags,
     targetCategoryId, subcategory_id || null, description || '', 
-    Number(price_inr || 0), Number(price_usd !== undefined && price_usd !== null && price_usd !== '' && Number(price_usd) > 0 ? price_usd : Number(((price_inr || 0) / 95).toFixed(2))), Number(discount_inr || price_inr || 0), Number(discount_usd !== undefined && discount_usd !== null && discount_usd !== '' && Number(discount_usd) > 0 ? discount_usd : Number(((discount_inr || price_inr || 0) / 95).toFixed(2))),
-    compare_price_inr || null, compare_price_usd || null, cost_per_item_inr || null, cost_per_item_usd || null,
-    Number(stock || 100), Number(weight || 0.5), hs_code || '310100', country_of_origin || 'India',
+    cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd,
+    cleanCompInr, cleanCompUsd, cleanCostInr, cleanCostUsd,
+    cleanStock, Number(weight || 0.5), hs_code || '310100', country_of_origin || 'India',
     is_best_product ? 1 : 0, title, description || '', cleanSeoKeywords, 
     typeof specs_json === 'object' ? JSON.stringify(specs_json) : (specs_json || null),
     gst_percent !== undefined && gst_percent !== '' && gst_percent !== null ? Number(gst_percent) : null,
@@ -1547,15 +1557,15 @@ app.post('/api/products', requireAdminAuth, (req, res) => {
     `);
     rawVariants.forEach(v => {
       if (!v) return;
-      const vName = v.variant_name || v.title || v.name || 'Standard Pack';
-      const vSku = v.sku || `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      const vPriceInr = Number(v.price_inr || v.price || price_inr || 0);
-      const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Number(v.price_usd) : Number((vPriceInr / 95).toFixed(2));
-      const vDiscInr = Number(v.discount_inr || v.discount || vPriceInr);
-      const vDiscUsd = (v.discount_usd !== undefined && v.discount_usd !== '' && Number(v.discount_usd) > 0) ? Number(v.discount_usd) : Number((vDiscInr / 95).toFixed(2));
-      const vCompInr = Number(v.compare_price_inr || 0);
-      const vCompUsd = (v.compare_price_usd !== undefined && v.compare_price_usd !== '' && Number(v.compare_price_usd) > 0) ? Number(v.compare_price_usd) : (vCompInr > 0 ? Number((vCompInr / 95).toFixed(2)) : null);
-      const vStock = v.stock !== undefined && v.stock !== '' ? Number(v.stock) : 50;
+      const vName = String(v.variant_name || v.title || v.name || 'Standard Pack').trim();
+      const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const vPriceInr = Math.max(0, Number(v.price_inr || v.price || cleanPriceInr || 0));
+      const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Math.max(0, Number(v.price_usd)) : Number((vPriceInr / 95).toFixed(2));
+      const vDiscInr = Math.max(0, Number(v.discount_inr || v.discount || vPriceInr));
+      const vDiscUsd = (v.discount_usd !== undefined && v.discount_usd !== '' && Number(v.discount_usd) > 0) ? Math.max(0, Number(v.discount_usd)) : Number((vDiscInr / 95).toFixed(2));
+      const vCompInr = (v.compare_price_inr !== undefined && v.compare_price_inr !== null && v.compare_price_inr !== '') ? Math.max(0, Number(v.compare_price_inr)) : null;
+      const vCompUsd = (v.compare_price_usd !== undefined && v.compare_price_usd !== null && v.compare_price_usd !== '' && Number(v.compare_price_usd) > 0) ? Math.max(0, Number(v.compare_price_usd)) : (vCompInr > 0 ? Number((vCompInr / 95).toFixed(2)) : null);
+      const vStock = v.stock !== undefined && v.stock !== '' ? Math.max(0, Number(v.stock)) : 50;
       let vImg = v.image_url || v.image || (cleanImages.length > 0 ? cleanImages[0] : null);
       if (typeof vImg === 'object' && vImg?.image_url) vImg = vImg.image_url;
 
@@ -1599,11 +1609,11 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
     }
   }
   
-  const finalPriceInr = price_inr !== undefined ? Number(price_inr || 0) : existing.price_inr;
-  const finalPriceUsd = price_usd !== undefined ? Number(price_usd) : (price_inr !== undefined ? Number((finalPriceInr / 95).toFixed(2)) : existing.price_usd);
-  const finalDiscInr = discount_inr !== undefined ? Number(discount_inr) : (price_inr !== undefined ? finalPriceInr : existing.discount_inr);
-  const finalDiscUsd = discount_usd !== undefined ? Number(discount_usd) : (price_usd !== undefined ? finalPriceUsd : existing.discount_usd);
-  const finalStock = stock !== undefined && stock !== null && stock !== '' ? Number(stock) : existing.stock;
+  const finalPriceInr = price_inr !== undefined ? Math.max(0, Number(price_inr || 0)) : existing.price_inr;
+  const finalPriceUsd = price_usd !== undefined ? Math.max(0, Number(price_usd)) : (price_inr !== undefined ? Number((finalPriceInr / 95).toFixed(2)) : existing.price_usd);
+  const finalDiscInr = discount_inr !== undefined ? Math.max(0, Number(discount_inr)) : (price_inr !== undefined ? finalPriceInr : existing.discount_inr);
+  const finalDiscUsd = discount_usd !== undefined ? Math.max(0, Number(discount_usd)) : (price_usd !== undefined ? finalPriceUsd : existing.discount_usd);
+  const finalStock = stock !== undefined && stock !== null && stock !== '' ? Math.max(0, Number(stock)) : existing.stock;
   const finalTitle = (title !== undefined && title !== null && String(title).trim() !== '') ? String(title).trim() : existing.title;
   const finalSlug = (title !== undefined && title !== null && String(title).trim() !== '') 
     ? String(title).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
@@ -1626,10 +1636,10 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
   `).run(
     finalTitle, finalSlug, finalSku, finalCategory, finalSubcategory || null, finalDesc, finalPriceInr, finalPriceUsd, 
     finalDiscInr, finalDiscUsd,
-    compare_price_inr !== undefined ? compare_price_inr : existing.compare_price_inr, 
-    compare_price_usd !== undefined ? compare_price_usd : existing.compare_price_usd, 
-    cost_per_item_inr !== undefined ? cost_per_item_inr : existing.cost_per_item_inr, 
-    cost_per_item_usd !== undefined ? cost_per_item_usd : existing.cost_per_item_usd,
+    compare_price_inr !== undefined && compare_price_inr !== null && compare_price_inr !== '' ? Math.max(0, Number(compare_price_inr)) : existing.compare_price_inr, 
+    compare_price_usd !== undefined && compare_price_usd !== null && compare_price_usd !== '' ? Math.max(0, Number(compare_price_usd)) : existing.compare_price_usd, 
+    cost_per_item_inr !== undefined && cost_per_item_inr !== null && cost_per_item_inr !== '' ? Math.max(0, Number(cost_per_item_inr)) : existing.cost_per_item_inr, 
+    cost_per_item_usd !== undefined && cost_per_item_usd !== null && cost_per_item_usd !== '' ? Math.max(0, Number(cost_per_item_usd)) : existing.cost_per_item_usd,
     barcode !== undefined ? barcode : existing.barcode, 
     finalStock, 
     finalStatus, 
@@ -1684,13 +1694,13 @@ app.put('/api/products/:id', requireAdminAuth, (req, res) => {
       if (!v) return;
       const vName = String(v.variant_name || v.title || v.name || 'Standard Pack').trim();
       const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      const vPriceInr = Number(v.price_inr || v.price || finalPriceInr || 0);
-      const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Number(v.price_usd) : Number((vPriceInr / 95).toFixed(2));
-      const vDiscInr = (v.discount_inr && Number(v.discount_inr) > 0 && Number(v.discount_inr) < vPriceInr) ? Number(v.discount_inr) : vPriceInr;
-      const vDiscUsd = (v.discount_usd && Number(v.discount_usd) > 0 && Number(v.discount_usd) < vPriceUsd) ? Number(v.discount_usd) : vPriceUsd;
-      const vCompInr = Number(v.compare_price_inr || 0);
-      const vCompUsd = (v.compare_price_usd !== undefined && v.compare_price_usd !== '' && Number(v.compare_price_usd) > 0) ? Number(v.compare_price_usd) : (vCompInr > 0 ? Number((vCompInr / 95).toFixed(2)) : null);
-      const vStock = v.stock !== undefined && v.stock !== '' ? Number(v.stock) : 50;
+      const vPriceInr = Math.max(0, Number(v.price_inr || v.price || finalPriceInr || 0));
+      const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Math.max(0, Number(v.price_usd)) : Number((vPriceInr / 95).toFixed(2));
+      const vDiscInr = (v.discount_inr && Number(v.discount_inr) > 0 && Number(v.discount_inr) < vPriceInr) ? Math.max(0, Number(v.discount_inr)) : vPriceInr;
+      const vDiscUsd = (v.discount_usd && Number(v.discount_usd) > 0 && Number(v.discount_usd) < vPriceUsd) ? Math.max(0, Number(v.discount_usd)) : vPriceUsd;
+      const vCompInr = (v.compare_price_inr !== undefined && v.compare_price_inr !== null && v.compare_price_inr !== '') ? Math.max(0, Number(v.compare_price_inr)) : null;
+      const vCompUsd = (v.compare_price_usd !== undefined && v.compare_price_usd !== null && v.compare_price_usd !== '' && Number(v.compare_price_usd) > 0) ? Math.max(0, Number(v.compare_price_usd)) : (vCompInr > 0 ? Number((vCompInr / 95).toFixed(2)) : null);
+      const vStock = v.stock !== undefined && v.stock !== '' ? Math.max(0, Number(v.stock)) : 50;
       let vImg = v.image_url || v.image || null;
       if (typeof vImg === 'object' && vImg?.image_url) vImg = vImg.image_url;
 
