@@ -877,18 +877,19 @@ app.post('/api/collections', (req, res) => {
   const navVal = (show_in_navbar === 1 || show_in_navbar === true || show_in_navbar === '1') ? 1 : 0;
 
   let colId;
+  const colImage = image_url !== undefined && image_url !== null ? String(image_url).trim() : 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80';
   try {
     const result = db.prepare(`
       INSERT INTO collections (name, slug, description, image_url, category_id, show_in_navbar)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, navVal);
+    `).run(cleanName, slug, description || '', colImage, category_id || null, navVal);
     colId = result.lastInsertRowid;
   } catch (e) {
     try {
       const result = db.prepare(`
         INSERT INTO collections (name, slug, description, image_url, category_id)
         VALUES (?, ?, ?, ?, ?)
-      `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null);
+      `).run(cleanName, slug, description || '', colImage, category_id || null);
       colId = result.lastInsertRowid;
     } catch (err2) {
       console.error('Collection insert error:', err2);
@@ -906,7 +907,19 @@ app.post('/api/collections', (req, res) => {
     } catch (e) {}
   }
 
-  res.status(201).json({ id: colId, slug, name: cleanName, show_in_navbar: navVal, message: 'Collection created successfully' });
+  try {
+    const { getMySQLPool } = require('./hostinger-mysql.cjs');
+    const pool = getMySQLPool();
+    if (pool) {
+      pool.query(`
+        INSERT INTO collections (id, name, slug, description, image_url, category_id, show_in_navbar)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE name = VALUES(name), slug = VALUES(slug), description = VALUES(description), image_url = VALUES(image_url), category_id = VALUES(category_id), show_in_navbar = VALUES(show_in_navbar)
+      `, [colId, cleanName, slug, description || '', colImage, category_id || null, navVal]).catch(() => {});
+    }
+  } catch (mErr) {}
+
+  res.status(201).json({ id: colId, slug, name: cleanName, image_url: colImage, show_in_navbar: navVal, message: 'Collection created successfully' });
 });
 
 app.put('/api/collections/:id', (req, res) => {
@@ -927,20 +940,21 @@ app.put('/api/collections/:id', (req, res) => {
     }
   }
   const navVal = (show_in_navbar === 1 || show_in_navbar === true || show_in_navbar === '1') ? 1 : 0;
+  const colImage = image_url !== undefined && image_url !== null ? String(image_url).trim() : 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80';
 
   try {
     db.prepare(`
       UPDATE collections
       SET name = ?, slug = ?, description = ?, image_url = ?, category_id = ?, show_in_navbar = ?
       WHERE id = ?
-    `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, navVal, id);
+    `).run(cleanName, slug, description || '', colImage, category_id || null, navVal, id);
   } catch (e) {
     try {
       db.prepare(`
         UPDATE collections
         SET name = ?, slug = ?, description = ?, image_url = ?, category_id = ?
         WHERE id = ?
-      `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, id);
+      `).run(cleanName, slug, description || '', colImage, category_id || null, id);
     } catch (err2) {
       console.error('Collection update error:', err2);
       return res.status(500).json({ error: err2.message });
@@ -957,7 +971,19 @@ app.put('/api/collections/:id', (req, res) => {
     } catch (e) {}
   }
 
-  res.json({ id: Number(id), slug, name: cleanName, message: 'Collection updated successfully' });
+  try {
+    const { getMySQLPool } = require('./hostinger-mysql.cjs');
+    const pool = getMySQLPool();
+    if (pool) {
+      pool.query(`
+        UPDATE collections
+        SET name = ?, slug = ?, description = ?, image_url = ?, category_id = ?, show_in_navbar = ?
+        WHERE id = ?
+      `, [cleanName, slug, description || '', colImage, category_id || null, navVal, id]).catch(() => {});
+    }
+  } catch (mErr) {}
+
+  res.json({ id: Number(id), slug, name: cleanName, image_url: colImage, message: 'Collection updated successfully' });
 });
 
 app.put(['/api/collections/:id/navbar-toggle', '/api/admin/collections/:id/navbar-toggle'], (req, res) => {

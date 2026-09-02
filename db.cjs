@@ -176,10 +176,57 @@ const db = Database ? new Database(dbPath) : {
         }
         if (s.includes('insert into collections')) {
           const [name, slug, description, image_url, category_id] = params;
-          const newColl = { id: nowId, name, slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), description: description || '', image_url: image_url || '', category_id: category_id || 1 };
+          const newColl = { id: nowId, name, slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), description: description || '', image_url: image_url || '', category_id: category_id || 1, show_in_navbar: 0 };
+          if (!fallbackStore.collections) fallbackStore.collections = [];
           fallbackStore.collections.push(newColl);
           saveFallbackStore();
           return { lastInsertRowid: nowId, changes: 1 };
+        }
+        if (s.includes('update collections') && s.includes('show_in_navbar =') && s.includes('image_url =')) {
+          const [name, slug, description, image_url, category_id, show_in_navbar, id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.map(c => 
+              String(c.id) === String(id) ? { ...c, name, slug: slug || c.slug, description: description || '', image_url: image_url || c.image_url, category_id: category_id || c.category_id, show_in_navbar: show_in_navbar !== undefined ? show_in_navbar : c.show_in_navbar } : c
+            );
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('update collections') && s.includes('image_url =')) {
+          const [name, slug, description, image_url, category_id, id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.map(c => 
+              String(c.id) === String(id) ? { ...c, name, slug: slug || c.slug, description: description || '', image_url: image_url || c.image_url, category_id: category_id || c.category_id } : c
+            );
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('update collections set show_in_navbar =')) {
+          const [show_in_navbar, id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.map(c => 
+              String(c.id) === String(id) ? { ...c, show_in_navbar } : c
+            );
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('delete from collections where id =')) {
+          const [id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.filter(c => String(c.id) !== String(id));
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('delete from product_collections where collection_id =')) {
+          const [collection_id] = params;
+          if (fallbackStore.product_collections) {
+            fallbackStore.product_collections = fallbackStore.product_collections.filter(pc => String(pc.collection_id) !== String(collection_id));
+            saveFallbackStore();
+          }
+          return { changes: 1 };
         }
         if (s.includes('insert into product_collections')) {
           const [product_id, collection_id] = params;
