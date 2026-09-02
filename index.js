@@ -818,16 +818,16 @@ app.post('/api/categories', requireAdminAuth, async (req, res) => {
     console.error('Category insert error:', err);
   }
 
-  // Direct MySQL Insert
-  await executeMySQL(
+  // Non-blocking Concurrent Direct MySQL Insert
+  executeMySQL(
     'INSERT INTO categories (id, name, slug, description, image_url, icon) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=VALUES(name), slug=VALUES(slug), description=VALUES(description), image_url=VALUES(image_url), icon=VALUES(icon)',
     [catId, cleanName, slug, description || '', image_url || '', icon !== undefined ? icon : '🌿']
-  );
+  ).catch(() => {});
 
   res.status(201).json({ id: catId, slug, name: cleanName, message: 'Category created successfully' });
 });
 
-app.put('/api/categories/:id', requireAdminAuth, async (req, res) => {
+app.put('/api/categories/:id', requireAdminAuth, (req, res) => {
   const { id } = req.params;
   const { name, description, image_url, icon } = req.body;
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Category name is required' });
@@ -852,16 +852,16 @@ app.put('/api/categories/:id', requireAdminAuth, async (req, res) => {
     console.error('Category update error:', err);
   }
 
-  // Direct MySQL Update
-  await executeMySQL(
+  // Non-blocking Concurrent Direct MySQL Update
+  executeMySQL(
     'UPDATE categories SET name = ?, slug = ?, description = ?, image_url = ?, icon = ? WHERE id = ?',
     [cleanName, slug, description || '', image_url || '', icon !== undefined ? icon : '🌿', id]
-  );
+  ).catch(() => {});
 
   res.json({ id: Number(id), name: cleanName, slug, message: 'Category updated successfully' });
 });
 
-app.delete('/api/categories/:id', requireAdminAuth, async (req, res) => {
+app.delete('/api/categories/:id', requireAdminAuth, (req, res) => {
   const { id } = req.params;
   try {
     db.prepare('DELETE FROM subcategories WHERE category_id = ?').run(id);
@@ -869,10 +869,12 @@ app.delete('/api/categories/:id', requireAdminAuth, async (req, res) => {
     db.prepare('DELETE FROM categories WHERE id = ?').run(id);
   } catch (e) {}
 
-  // Direct MySQL Permanent Delete
-  await executeMySQL('DELETE FROM subcategories WHERE category_id = ?', [id]);
-  await executeMySQL('UPDATE products SET category_id = NULL WHERE category_id = ?', [id]);
-  await executeMySQL('DELETE FROM categories WHERE id = ?', [id]);
+  // Non-blocking Concurrent Direct MySQL Permanent Delete
+  (async () => {
+    await executeMySQL('DELETE FROM subcategories WHERE category_id = ?', [id]);
+    await executeMySQL('UPDATE products SET category_id = NULL WHERE category_id = ?', [id]);
+    await executeMySQL('DELETE FROM categories WHERE id = ?', [id]);
+  })().catch(() => {});
 
   res.json({ message: 'Category deleted permanently from database' });
 });
