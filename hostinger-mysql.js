@@ -32,7 +32,15 @@ async function setupHostingerMySQL() {
     const connection = await mysql.createConnection(config);
     console.log('✅ Connected successfully to Hostinger MySQL!');
 
-    console.log('Creating database tables in Hostinger MySQL...');
+    // Check if tables already exist
+    const [existingTables] = await connection.query("SHOW TABLES LIKE 'categories'");
+    if (existingTables && existingTables.length > 0) {
+      console.log('✅ All tables already exist and verified in Hostinger MySQL! Skipping re-creation & seeding.');
+      await connection.end();
+      return true;
+    }
+
+    console.log('Tables not found. Initializing database tables in Hostinger MySQL...');
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS store_settings (
@@ -355,8 +363,34 @@ async function setupHostingerMySQL() {
   }
 }
 
+let poolInstance = null;
+
+function getMySQLPool() {
+  if (poolInstance) return poolInstance;
+  let mysqlHost = process.env.MYSQL_HOST || '127.0.0.1';
+  if (mysqlHost === 'localhost') mysqlHost = '127.0.0.1';
+
+  if (!process.env.MYSQL_USER || !process.env.MYSQL_PASSWORD || !process.env.MYSQL_DATABASE) {
+    return null;
+  }
+
+  poolInstance = mysql.createPool({
+    host: mysqlHost,
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE,
+    port: Number(process.env.MYSQL_PORT) || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 8000
+  });
+
+  return poolInstance;
+}
+
 if (require.main === module) {
   setupHostingerMySQL();
 }
 
-module.exports = { setupHostingerMySQL };
+module.exports = { setupHostingerMySQL, getMySQLPool };
