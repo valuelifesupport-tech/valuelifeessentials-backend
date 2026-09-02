@@ -723,17 +723,62 @@ app.get(['/api/categories', '/api/categories/tree'], (req, res) => {
 
 app.post('/api/categories', requireAdminAuth, (req, res) => {
   const { name, description, image_url, icon } = req.body;
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-  const result = db.prepare('INSERT INTO categories (name, slug, description, image_url, icon) VALUES (?, ?, ?, ?, ?)').run(name, slug, description || '', image_url || '', icon !== undefined ? icon : '');
-  res.status(201).json({ id: result.lastInsertRowid, slug, message: 'Category created' });
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Category name is required' });
+  const cleanName = String(name).trim();
+  let baseSlug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') || `category-${Date.now()}`;
+  let slug = baseSlug;
+  let counter = 1;
+  while (true) {
+    try {
+      const existing = db.prepare('SELECT id FROM categories WHERE LOWER(slug) = ?').get(slug.toLowerCase());
+      if (!existing) break;
+      slug = `${baseSlug}-${counter++}`;
+    } catch (e) {
+      break;
+    }
+  }
+
+  try {
+    const result = db.prepare('INSERT INTO categories (name, slug, description, image_url, icon) VALUES (?, ?, ?, ?, ?)').run(
+      cleanName, 
+      slug, 
+      description || '', 
+      image_url || '', 
+      icon !== undefined ? icon : '🌿'
+    );
+    res.status(201).json({ id: result.lastInsertRowid, slug, name: cleanName, message: 'Category created successfully' });
+  } catch (err) {
+    console.error('Category insert error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.put('/api/categories/:id', requireAdminAuth, (req, res) => {
+  const { id } = req.params;
   const { name, description, image_url, icon } = req.body;
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-  db.prepare('UPDATE categories SET name = ?, slug = ?, description = ?, image_url = ?, icon = ? WHERE id = ?')
-    .run(name, slug, description || '', image_url || '', icon !== undefined ? icon : '', req.params.id);
-  res.json({ message: 'Category updated' });
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Category name is required' });
+  const cleanName = String(name).trim();
+  let baseSlug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') || `category-${id}`;
+  let slug = baseSlug;
+  let counter = 1;
+  while (true) {
+    try {
+      const existing = db.prepare('SELECT id FROM categories WHERE LOWER(slug) = ? AND id != ?').get(slug.toLowerCase(), id);
+      if (!existing) break;
+      slug = `${baseSlug}-${counter++}`;
+    } catch (e) {
+      break;
+    }
+  }
+
+  try {
+    db.prepare('UPDATE categories SET name = ?, slug = ?, description = ?, image_url = ?, icon = ? WHERE id = ?')
+      .run(cleanName, slug, description || '', image_url || '', icon !== undefined ? icon : '🌿', id);
+    res.json({ id: Number(id), name: cleanName, slug, message: 'Category updated successfully' });
+  } catch (err) {
+    console.error('Category update error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete('/api/categories/:id', requireAdminAuth, (req, res) => {
@@ -801,9 +846,13 @@ app.get('/api/collections', (req, res) => {
       computedProdIds = [...computedProdIds, ...newIds];
     }
 
-    const uniqueProdIds = Array.from(new Set(computedProdIds));
-    const navVal = (col.show_in_navbar === 1 || col.show_in_navbar === true || String(col.show_in_navbar) === '1') ? 1 : 0;
-    return { ...col, show_in_navbar: navVal, product_ids: uniqueProdIds, product_count: uniqueProdIds.length };
+    const uniqueFinalProdIds = Array.from(new Set(computedProdIds));
+
+    return {
+      ...col,
+      product_ids: uniqueFinalProdIds,
+      products_count: uniqueFinalProdIds.length
+    };
   });
 
   res.json(result);
@@ -811,7 +860,20 @@ app.get('/api/collections', (req, res) => {
 
 app.post('/api/collections', (req, res) => {
   const { name, description, image_url, category_id, show_in_navbar, product_ids } = req.body;
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Collection name is required' });
+  const cleanName = String(name).trim();
+  let baseSlug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') || `collection-${Date.now()}`;
+  let slug = baseSlug;
+  let counter = 1;
+  while (true) {
+    try {
+      const existing = db.prepare('SELECT id FROM collections WHERE LOWER(slug) = ?').get(slug.toLowerCase());
+      if (!existing) break;
+      slug = `${baseSlug}-${counter++}`;
+    } catch (e) {
+      break;
+    }
+  }
   const navVal = (show_in_navbar === 1 || show_in_navbar === true || show_in_navbar === '1') ? 1 : 0;
 
   let colId;
@@ -819,14 +881,19 @@ app.post('/api/collections', (req, res) => {
     const result = db.prepare(`
       INSERT INTO collections (name, slug, description, image_url, category_id, show_in_navbar)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(name, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, navVal);
+    `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, navVal);
     colId = result.lastInsertRowid;
   } catch (e) {
-    const result = db.prepare(`
-      INSERT INTO collections (name, slug, description, image_url, category_id)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(name, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null);
-    colId = result.lastInsertRowid;
+    try {
+      const result = db.prepare(`
+        INSERT INTO collections (name, slug, description, image_url, category_id)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null);
+      colId = result.lastInsertRowid;
+    } catch (err2) {
+      console.error('Collection insert error:', err2);
+      return res.status(500).json({ error: err2.message });
+    }
   }
 
   if (product_ids && Array.isArray(product_ids)) {
@@ -839,13 +906,26 @@ app.post('/api/collections', (req, res) => {
     } catch (e) {}
   }
 
-  res.status(201).json({ id: colId, slug, show_in_navbar: navVal, message: 'Collection created successfully' });
+  res.status(201).json({ id: colId, slug, name: cleanName, show_in_navbar: navVal, message: 'Collection created successfully' });
 });
 
 app.put('/api/collections/:id', (req, res) => {
   const { id } = req.params;
   const { name, description, image_url, category_id, show_in_navbar, product_ids } = req.body;
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Collection name is required' });
+  const cleanName = String(name).trim();
+  let baseSlug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') || `collection-${id}`;
+  let slug = baseSlug;
+  let counter = 1;
+  while (true) {
+    try {
+      const existing = db.prepare('SELECT id FROM collections WHERE LOWER(slug) = ? AND id != ?').get(slug.toLowerCase(), id);
+      if (!existing) break;
+      slug = `${baseSlug}-${counter++}`;
+    } catch (e) {
+      break;
+    }
+  }
   const navVal = (show_in_navbar === 1 || show_in_navbar === true || show_in_navbar === '1') ? 1 : 0;
 
   try {
@@ -853,13 +933,18 @@ app.put('/api/collections/:id', (req, res) => {
       UPDATE collections
       SET name = ?, slug = ?, description = ?, image_url = ?, category_id = ?, show_in_navbar = ?
       WHERE id = ?
-    `).run(name, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, navVal, id);
+    `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, navVal, id);
   } catch (e) {
-    db.prepare(`
-      UPDATE collections
-      SET name = ?, slug = ?, description = ?, image_url = ?, category_id = ?
-      WHERE id = ?
-    `).run(name, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, id);
+    try {
+      db.prepare(`
+        UPDATE collections
+        SET name = ?, slug = ?, description = ?, image_url = ?, category_id = ?
+        WHERE id = ?
+      `).run(cleanName, slug, description || '', image_url || 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=800&q=80', category_id || null, id);
+    } catch (err2) {
+      console.error('Collection update error:', err2);
+      return res.status(500).json({ error: err2.message });
+    }
   }
 
   if (product_ids && Array.isArray(product_ids)) {
@@ -872,7 +957,7 @@ app.put('/api/collections/:id', (req, res) => {
     } catch (e) {}
   }
 
-  res.json({ message: 'Collection updated successfully' });
+  res.json({ id: Number(id), slug, name: cleanName, message: 'Collection updated successfully' });
 });
 
 app.put(['/api/collections/:id/navbar-toggle', '/api/admin/collections/:id/navbar-toggle'], (req, res) => {
@@ -1105,19 +1190,17 @@ try {
   });
 } catch (e) {}
 
-// ENSURE DEFAULT SYSTEM NAVBAR COLLECTIONS EXIST (Offers, Best Sellers, New Arrivals)
+// INITIAL SEED OF DEFAULT COLLECTIONS ONLY IF COLLECTIONS TABLE IS COMPLETELY EMPTY
 try {
-  const existingColls = db.prepare('SELECT slug FROM collections').all();
-  const existingSlugs = new Set((Array.isArray(existingColls) ? existingColls : []).map(c => String(c.slug).toLowerCase()));
+  const existingColls = db.prepare('SELECT id, slug FROM collections').all();
+  if (!existingColls || existingColls.length === 0) {
+    const defaultNavbarCollections = [
+      { name: '🔥 Offers', slug: 'offers', description: 'Special discount offers and promotional deals', show_in_navbar: 1 },
+      { name: '⭐ Best Sellers', slug: 'bestsellers', description: 'Top rated and best selling products', show_in_navbar: 1 },
+      { name: '✨ New Arrivals', slug: 'new-arrivals', description: 'Newly launched fresh products', show_in_navbar: 1 }
+    ];
 
-  const defaultNavbarCollections = [
-    { name: '🔥 Offers', slug: 'offers', description: 'Special discount offers and promotional deals', show_in_navbar: 1 },
-    { name: '⭐ Best Sellers', slug: 'bestsellers', description: 'Top rated and best selling products', show_in_navbar: 1 },
-    { name: '✨ New Arrivals', slug: 'new-arrivals', description: 'Newly launched fresh products', show_in_navbar: 1 }
-  ];
-
-  defaultNavbarCollections.forEach(col => {
-    if (!existingSlugs.has(col.slug)) {
+    defaultNavbarCollections.forEach(col => {
       try {
         db.prepare('INSERT INTO collections (name, slug, description, image_url, show_in_navbar) VALUES (?, ?, ?, ?, ?)').run(
           col.name,
@@ -1127,12 +1210,8 @@ try {
           1
         );
       } catch (e) {}
-    } else {
-      try {
-        db.prepare('UPDATE collections SET show_in_navbar = 1 WHERE LOWER(slug) = ?').run(col.slug);
-      } catch (e) {}
-    }
-  });
+    });
+  }
 } catch (e) {}
 
 // Single Product Detail by Slug or ID (STRICT EXACT MATCH ONLY)
