@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const db = require('./db.cjs');
 const { setupHostingerMySQL, getMySQLPool } = require('./hostinger-mysql.cjs');
+const { paymentManager } = require('./paymentGateways.cjs');
 
 // CENTRALIZED DIRECT MYSQL QUERY HELPER (WITH NON-BLOCKING FAST TIMEOUT)
 async function executeMySQL(sql, params = []) {
@@ -91,6 +92,13 @@ try {
   const oCols = oInfo.map(c => c.name);
   if (!oCols.includes('product_title')) db.prepare("ALTER TABLE order_items ADD COLUMN product_title TEXT").run();
   if (!oCols.includes('variant_name')) db.prepare("ALTER TABLE order_items ADD COLUMN variant_name TEXT").run();
+
+  const ordInfo = db.prepare("PRAGMA table_info(orders)").all();
+  const ordCols = ordInfo.map(c => c.name);
+  if (!ordCols.includes('user_id')) db.prepare("ALTER TABLE orders ADD COLUMN user_id INTEGER").run();
+  if (!ordCols.includes('payment_gateway')) db.prepare("ALTER TABLE orders ADD COLUMN payment_gateway TEXT DEFAULT 'razorpay'").run();
+  if (!ordCols.includes('gateway_order_id')) db.prepare("ALTER TABLE orders ADD COLUMN gateway_order_id TEXT").run();
+  if (!ordCols.includes('gateway_payment_id')) db.prepare("ALTER TABLE orders ADD COLUMN gateway_payment_id TEXT").run();
 
   const uInfo = db.prepare("PRAGMA table_info(users)").all();
   const uCols = uInfo.map(c => c.name);
@@ -2239,7 +2247,7 @@ app.delete('/api/coupons/:id', async (req, res) => {
 
 // Orders API (WITH STRICT SERVER-SIDE BURP-SUITE PROOF PRICE INTEGRITY)
 app.post('/api/orders', (req, res) => {
-  const { customer_name, customer_email, customer_phone, shipping_address, country, currency, total_amount, paid_amount, remaining_amount, payment_mode, order_notes, customer_gstin, items } = req.body;
+  const { customer_name, customer_email, customer_phone, shipping_address, country, currency, total_amount, paid_amount, remaining_amount, payment_mode, order_notes, customer_gstin, items, user_id, payment_gateway } = req.body;
 
   // Validate: Reject empty cart orders
   if (!items || !Array.isArray(items) || items.length === 0) {
@@ -2318,6 +2326,17 @@ app.post('/api/orders', (req, res) => {
   const safeMode = payment_mode || 'PARTIAL_COD';
 
   try {
+    // Automatically link to user ID if available
+    let resolvedUserId = user_id || null;
+    if (!resolvedUserId) {
+      try {
+        const uRow = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) OR phone = ?').get(safeEmail, safePhone);
+        if (uRow) resolvedUserId = uRow.id;
+      } catch (e) {}
+    }
+
+    const safeGateway = payment_gateway || (safeMode === 'COD' ? 'cod' : 'razorpay');
+
     // GST Calculation Engine
     const storeSettings = db.prepare('SELECT * FROM store_settings WHERE id = 1').get() || {};
     const isGstEnabled = Number(storeSettings.enable_gst ?? 1) === 1;
@@ -2343,9 +2362,18 @@ app.post('/api/orders', (req, res) => {
     }
 
     const stmt = db.prepare(`
-      INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_address, country, currency, total_amount, paid_amount, remaining_amount, payment_mode, payment_status, order_notes, gst_amount, cgst_amount, sgst_amount, igst_amount, customer_gstin)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO orders (
+        order_number, customer_name, customer_email, customer_phone, shipping_address, 
+        country, currency, total_amount, paid_amount, remaining_amount, 
+        payment_mode, payment_status, order_notes, gst_amount, cgst_amount, 
+        sgst_amount, igst_amount, customer_gstin, user_id, payment_gateway
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+
+    const initialStatus = (safeMode === 'COD' || safeMode === '100%_COD')
+      ? 'PENDING'
+      : (paidAmount > 0 ? ((safeMode === 'PARTIAL' || safeMode === 'PARTIAL_COD') ? 'PARTIAL_PAID' : 'PAID') : 'PAYMENT_PENDING');
 
     const result = stmt.run(
       orderNumber, 
@@ -2359,13 +2387,15 @@ app.post('/api/orders', (req, res) => {
       paidAmount, 
       remainingAmount, 
       safeMode, 
-      (safeMode === 'PARTIAL' || safeMode === 'PARTIAL_COD') ? 'PARTIAL_PAID' : 'PAID',
+      initialStatus,
       order_notes || '',
       totalGst,
       cgst,
       sgst,
       igst,
-      customer_gstin || ''
+      customer_gstin || '',
+      resolvedUserId,
+      safeGateway
     );
 
     const orderId = result.lastInsertRowid;
@@ -2502,7 +2532,7 @@ const handleUpdateOrder = (req, res) => {
     // Attach order items if available
     try {
       const items = db.prepare(`
-        SELECT oi.*, p.title as product_title, p.image_url as thumbnail, p.image_url, p.sku as product_sku, pv.variant_name, pv.sku as variant_sku
+        SELECT oi.*, p.title as product_title, (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1) as thumbnail, p.sku as product_sku, pv.variant_name, pv.sku as variant_sku
         FROM order_items oi
         LEFT JOIN products p ON oi.product_id = p.id
         LEFT JOIN product_variants pv ON oi.variant_id = pv.id
@@ -3325,9 +3355,78 @@ app.post('/api/auth/login', rateLimiter(30, 60000), (req, res) => {
 app.get('/api/users/:email/orders', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   try {
-    const target = req.params.email ? req.params.email.trim() : '';
-    if (!target) return res.json([]);
-    const orders = db.prepare('SELECT * FROM orders WHERE LOWER(customer_email) = LOWER(?) OR customer_phone = ? ORDER BY id DESC').all(target, target);
+    const target = req.params.email ? decodeURIComponent(req.params.email).trim() : '';
+    const queryEmail = req.query.email ? decodeURIComponent(req.query.email).trim() : '';
+    const queryPhone = req.query.phone ? decodeURIComponent(req.query.phone).trim() : '';
+    const queryUserId = req.query.user_id ? Number(req.query.user_id) : null;
+
+    if (!target && !queryEmail && !queryPhone && !queryUserId) return res.json([]);
+
+    // Find user record by any provided identifier
+    let user = null;
+    try {
+      user = db.prepare(`
+        SELECT id, email, phone FROM users 
+        WHERE LOWER(email) = LOWER(?) 
+           OR phone = ? 
+           OR CAST(id AS TEXT) = ? 
+           OR (LOWER(email) = LOWER(?)) 
+           OR (phone = ?)
+      `).get(target, target, target, queryEmail, queryPhone);
+    } catch (e) {}
+
+    const emails = new Set();
+    const phones = new Set();
+    const userIds = new Set();
+
+    if (target) {
+      if (target.includes('@')) emails.add(target.toLowerCase());
+      else if (/^\d+$/.test(target)) {
+        phones.add(target);
+        userIds.add(Number(target));
+      } else {
+        emails.add(target.toLowerCase());
+      }
+    }
+    if (queryEmail) emails.add(queryEmail.toLowerCase());
+    if (queryPhone) phones.add(queryPhone);
+    if (queryUserId) userIds.add(queryUserId);
+
+    if (user) {
+      if (user.id) userIds.add(user.id);
+      if (user.email) emails.add(user.email.toLowerCase().trim());
+      if (user.phone) phones.add(user.phone.trim());
+    }
+
+    const conditions = [];
+    const params = [];
+
+    if (userIds.size > 0) {
+      const uArr = Array.from(userIds);
+      conditions.push(`user_id IN (${uArr.map(() => '?').join(',')})`);
+      params.push(...uArr);
+    }
+
+    if (emails.size > 0) {
+      const eArr = Array.from(emails);
+      conditions.push(`LOWER(customer_email) IN (${eArr.map(() => '?').join(',')})`);
+      params.push(...eArr);
+    }
+
+    if (phones.size > 0) {
+      const pArr = Array.from(phones);
+      conditions.push(`customer_phone IN (${pArr.map(() => '?').join(',')})`);
+      params.push(...pArr);
+    }
+
+    if (conditions.length === 0) return res.json([]);
+
+    const query = `
+      SELECT * FROM orders 
+      WHERE ${conditions.join(' OR ')} 
+      ORDER BY id DESC
+    `;
+    const orders = db.prepare(query).all(...params);
     if (!Array.isArray(orders)) return res.json([]);
 
     const ordersWithItems = orders.map(order => {
@@ -3336,10 +3435,10 @@ app.get('/api/users/:email/orders', (req, res) => {
         items = db.prepare(`
           SELECT oi.*, 
                  COALESCE(oi.product_title, p.title) as product_title, 
-                 p.image_url as thumbnail, p.image_url,
+                 (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1) as thumbnail,
                  (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1) as primary_image,
                  COALESCE(oi.variant_name, pv.variant_name) as variant_name,
-                 COALESCE(pv.image_url, (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1), p.image_url) as item_image
+                 COALESCE(pv.image_url, (SELECT image_url FROM product_images WHERE product_id = p.id AND is_primary = 1 LIMIT 1), 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=600&q=80') as item_image
           FROM order_items oi
           LEFT JOIN products p ON oi.product_id = p.id
           LEFT JOIN product_variants pv ON oi.variant_id = pv.id
@@ -4064,116 +4163,111 @@ app.delete('/api/wishlist', (req, res) => {
 });
 
 // ==========================================
-// RAZORPAY PAYMENT GATEWAY INTEGRATION
+// UNIVERSAL PLUGGABLE PAYMENT GATEWAYS
 // ==========================================
+
+// 1. Get all available / active payment gateways
+app.get('/api/payment/gateways', (req, res) => {
+  res.json({
+    success: true,
+    gateways: paymentManager.getAllGateways(),
+    active_gateways: paymentManager.getActiveGateways()
+  });
+});
 
 // Config / Keys endpoint for frontend checkout modal
 app.get('/api/payment/config', (req, res) => {
-  const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_valuelife2026';
-  const isLive = Boolean(process.env.RAZORPAY_KEY_ID && !process.env.RAZORPAY_KEY_ID.includes('test'));
+  const rzp = paymentManager.get('razorpay');
   res.json({
     gateway: 'RAZORPAY',
-    key_id: keyId,
+    key_id: rzp.keyId || 'rzp_test_valuelife2026',
     currency: 'INR',
-    is_live: isLive,
+    is_live: !rzp.isTestMode,
+    is_test_mode: rzp.isTestMode,
+    gateways: paymentManager.getActiveGateways(),
     supported_modes: ['PREPAID', 'PARTIAL_COD', 'COD']
   });
 });
 
-// Create Razorpay Order
-app.post('/api/payment/razorpay/create-order', async (req, res) => {
-  const { amount, currency = 'INR', receipt, notes } = req.body;
-  const numAmount = Number(amount);
-  if (!numAmount || numAmount <= 0) {
-    return res.status(400).json({ error: 'Valid amount is required' });
+// 2. Unified Create Payment Order
+app.post('/api/payment/create-order', async (req, res) => {
+  const { gateway = 'razorpay', amount, currency = 'INR', receipt, notes, orderId } = req.body;
+  try {
+    const gw = paymentManager.get(gateway);
+    const result = await gw.createOrder({ amount, currency, receipt, notes, orderId });
+    res.json(result);
+  } catch (err) {
+    console.error('Payment order creation error:', err);
+    res.status(400).json({ error: err.message || 'Failed to initialize payment gateway' });
   }
-
-  const amountInPaise = Math.round(numAmount * 100);
-  const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_valuelife2026';
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || 'valuelife_sec_2026_test';
-
-  const orderPayload = {
-    id: `order_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-    entity: 'order',
-    amount: amountInPaise,
-    amount_paid: 0,
-    amount_due: amountInPaise,
-    currency: currency.toUpperCase(),
-    receipt: receipt || `rcpt_${Date.now()}`,
-    status: 'created',
-    notes: notes || {}
-  };
-
-  if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-    try {
-      const authHeader = 'Basic ' + Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
-      const rzpRes = await fetch('https://api.razorpay.com/v1/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeader
-        },
-        body: JSON.stringify({
-          amount: amountInPaise,
-          currency: currency.toUpperCase(),
-          receipt: receipt || `rcpt_${Date.now()}`,
-          notes: notes || {}
-        })
-      });
-      const rzpData = await rzpRes.json();
-      if (rzpRes.ok) {
-        return res.json(rzpData);
-      }
-    } catch (e) {
-      console.warn('Razorpay API direct call error, using local secure order:', e.message);
-    }
-  }
-
-  res.json({
-    id: orderPayload.id,
-    amount: orderPayload.amount,
-    currency: orderPayload.currency,
-    receipt: orderPayload.receipt,
-    status: 'created',
-    key_id: keyId
-  });
 });
 
-// Verify Razorpay Payment Signature
-app.post('/api/payment/razorpay/verify', (req, res) => {
+// Create Razorpay Order (Backward compatible)
+app.post('/api/payment/razorpay/create-order', async (req, res) => {
+  const { amount, currency = 'INR', receipt, notes, orderId } = req.body;
+  try {
+    const rzp = paymentManager.get('razorpay');
+    const result = await rzp.createOrder({ amount, currency, receipt, notes, orderId });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Valid amount is required' });
+  }
+});
+
+// 3. Unified Verify Payment
+app.post('/api/payment/verify', async (req, res) => {
+  const { gateway = 'razorpay', order_id, ...paymentData } = req.body;
+  try {
+    const gw = paymentManager.get(gateway);
+    const result = await gw.verifyPayment({ ...paymentData, order_id });
+
+    if (result.verified && order_id) {
+      try {
+        const payId = result.payment_id || paymentData.razorpay_payment_id || paymentData.transaction_id || `pay_${Date.now()}`;
+        db.prepare(`
+          UPDATE orders
+          SET payment_status = 'PAID',
+              payment_gateway = ?,
+              gateway_payment_id = ?,
+              order_notes = order_notes || ' [' || UPPER(?) || ' Verified ID: ' || ? || ']'
+          WHERE id = ?
+        `).run(gateway, payId, gateway, payId, order_id);
+      } catch (dbErr) {
+        console.warn('DB update order payment notice:', dbErr.message);
+      }
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('Payment verify error:', err);
+    res.status(400).json({ error: err.message || 'Payment verification failed' });
+  }
+});
+
+// Verify Razorpay Payment Signature (Backward compatible)
+app.post('/api/payment/razorpay/verify', async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature, order_id } = req.body;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET || 'valuelife_sec_2026_test';
+  try {
+    const rzp = paymentManager.get('razorpay');
+    const result = await rzp.verifyPayment({ razorpay_order_id, razorpay_payment_id, razorpay_signature, order_id });
 
-  if (!razorpay_order_id || !razorpay_payment_id) {
-    return res.status(400).json({ error: 'Missing payment details' });
+    if (result.verified && order_id) {
+      try {
+        db.prepare(`
+          UPDATE orders
+          SET payment_status = 'PAID',
+              payment_gateway = 'razorpay',
+              gateway_payment_id = ?,
+              order_notes = order_notes || ' [Razorpay Verified ID: ' || ? || ']'
+          WHERE id = ?
+        `).run(razorpay_payment_id, razorpay_payment_id, order_id);
+      } catch (e) {}
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Verification failed' });
   }
-
-  const crypto = require('crypto');
-  const expectedSig = crypto
-    .createHmac('sha256', keySecret)
-    .update(razorpay_order_id + '|' + razorpay_payment_id)
-    .digest('hex');
-
-  const isValid = razorpay_signature === expectedSig || (!process.env.RAZORPAY_KEY_SECRET && Boolean(razorpay_payment_id));
-
-  if (order_id) {
-    try {
-      db.prepare(`
-        UPDATE orders
-        SET payment_status = 'PAID',
-            order_notes = order_notes || ' [Razorpay Payment ID: ' || ? || ']'
-        WHERE id = ?
-      `).run(razorpay_payment_id, order_id);
-    } catch (e) {}
-  }
-
-  res.json({
-    success: true,
-    verified: isValid,
-    payment_id: razorpay_payment_id,
-    order_id: razorpay_order_id,
-    message: 'Payment verified successfully'
-  });
 });
 
 // Razorpay Webhook Handler
