@@ -263,6 +263,34 @@ const db = Database ? new Database(dbPath) : {
           saveFallbackStore();
           return { lastInsertRowid: nowId, changes: 1 };
         }
+        if (s.includes('insert into product_variants')) {
+          const [product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, compare_price_inr, compare_price_usd, stock, image_url] = params;
+          if (!fallbackStore.product_variants) fallbackStore.product_variants = [];
+          fallbackStore.product_variants.push({
+            id: nowId,
+            product_id: Number(product_id),
+            variant_name: variant_name || 'Standard Pack',
+            sku: sku || `OB-VAR-${nowId}`,
+            price_inr: Number(price_inr || 0),
+            price_usd: Number(price_usd || (price_inr > 0 ? Number((price_inr/95).toFixed(2)) : 0)),
+            discount_inr: Number(discount_inr || price_inr || 0),
+            discount_usd: Number(discount_usd || price_usd || 0),
+            compare_price_inr: compare_price_inr ? Number(compare_price_inr) : null,
+            compare_price_usd: compare_price_usd ? Number(compare_price_usd) : null,
+            stock: Number(stock || 50),
+            image_url: image_url || null
+          });
+          saveFallbackStore();
+          return { lastInsertRowid: nowId, changes: 1 };
+        }
+        if (s.includes('delete from product_variants where product_id =')) {
+          const [product_id] = params;
+          if (fallbackStore.product_variants) {
+            fallbackStore.product_variants = fallbackStore.product_variants.filter(v => String(v.product_id) !== String(product_id));
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
         if (s.includes('delete from products where id =')) {
           const [id] = params;
           fallbackStore.products = fallbackStore.products.filter(p => String(p.id) !== String(id));
@@ -285,19 +313,29 @@ const db = Database ? new Database(dbPath) : {
         if (s.includes('store_theme_config')) return fallbackStore.store_theme_config;
         if (s.includes('store_sections_config')) return fallbackStore.store_sections_config;
         if (s.includes('store_settings')) return fallbackStore.store_settings;
-        if (s.includes('from products where id =')) {
-          const [id] = params;
-          return fallbackStore.products.find(p => String(p.id) === String(id)) || null;
+        if (s.includes('from products')) {
+          const [p1, p2, p3] = params;
+          const searchVal = String(p1 || '').toLowerCase();
+          return (fallbackStore.products || []).find(p => 
+            String(p.id) === String(p1) || 
+            String(p.slug || '').toLowerCase() === searchVal ||
+            String(p.slug || '').toLowerCase() === String(p2 || '').toLowerCase() ||
+            String(p.id) === String(p3 || '') ||
+            String(p.title || '').toLowerCase() === searchVal
+          ) || null;
         }
         if (s.includes('from collections where')) {
           const [p1] = params;
-          return fallbackStore.collections.find(c => String(c.slug).toLowerCase() === String(p1).toLowerCase() || String(c.id) === String(p1)) || null;
+          return (fallbackStore.collections || []).find(c => String(c.slug).toLowerCase() === String(p1).toLowerCase() || String(c.id) === String(p1)) || null;
         }
         if (s.includes('from users where')) {
           const [p1, p2] = params;
-          return fallbackStore.users.find(u => String(u.phone) === String(p1) || String(u.email).toLowerCase() === String(p2).toLowerCase()) || null;
+          return (fallbackStore.users || []).find(u => String(u.phone) === String(p1) || String(u.email).toLowerCase() === String(p2).toLowerCase()) || null;
         }
-        return { count: 0, cnt: 0 };
+        if (s.includes('count(') || s.includes('avg(')) {
+          return { count: 0, cnt: 0, avg_rating: 0, total_reviews: 0 };
+        }
+        return null;
       },
       all: (...params) => {
         if (s.includes('from categories')) return fallbackStore.categories || [];
