@@ -2220,17 +2220,31 @@ app.put('/api/variants/:id/stock', (req, res) => {
 });
 
 // Add Variant to Product
-app.post('/api/products/:id/variants', (req, res) => {
+app.post('/api/products/:id/variants', async (req, res) => {
   const { id } = req.params;
   const { variant_name, price_inr, price_usd, discount_inr, discount_usd, stock, image_url } = req.body;
   const sku = req.body.sku || `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
-  const result = db.prepare(`
+  const cleanPriceInr = Number(price_inr || 0);
+  const cleanPriceUsd = price_usd !== undefined && price_usd !== '' && Number(price_usd) > 0 ? Number(price_usd) : Number((cleanPriceInr / 95).toFixed(2));
+  const cleanDiscInr = discount_inr !== undefined && discount_inr !== '' && Number(discount_inr) > 0 ? Number(discount_inr) : cleanPriceInr;
+  const cleanDiscUsd = discount_usd !== undefined && discount_usd !== '' && Number(discount_usd) > 0 ? Number(discount_usd) : cleanPriceUsd;
+
+  let insertId = Date.now();
+  try {
+    const result = db.prepare(`
+      INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, variant_name, sku, cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd, stock || 50, image_url || null);
+    if (result && result.lastInsertRowid) insertId = result.lastInsertRowid;
+  } catch (e) {}
+
+  await executeMySQL(`
     INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, variant_name, sku, price_inr, price_usd || Math.round(price_inr / 40), discount_inr || price_inr, discount_usd || price_usd || Math.round(price_inr / 40), stock || 50, image_url || null);
+  `, [id, variant_name, sku, cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd, stock || 50, image_url || null]);
 
-  res.status(201).json({ id: result.lastInsertRowid, message: 'Variant added' });
+  res.status(201).json({ id: insertId, message: 'Variant added' });
 });
 
 app.delete('/api/variants/:id', async (req, res) => {
