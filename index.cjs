@@ -842,7 +842,7 @@ app.get(['/api/categories', '/api/categories/tree'], async (req, res) => {
   const categories = await executeMySQL('SELECT * FROM categories ORDER BY id ASC');
   const subcategories = await executeMySQL('SELECT * FROM subcategories ORDER BY id ASC');
   
-  if (Array.isArray(categories) && categories.length > 0) {
+  if (Array.isArray(categories)) {
     const result = categories.map(cat => ({
       ...cat,
       subcategories: (Array.isArray(subcategories) ? subcategories : []).filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
@@ -852,9 +852,9 @@ app.get(['/api/categories', '/api/categories/tree'], async (req, res) => {
 
   const fallbackCats = db.prepare('SELECT * FROM categories ORDER BY id ASC').all();
   const fallbackSubs = db.prepare('SELECT * FROM subcategories ORDER BY id ASC').all();
-  const result = fallbackCats.map(cat => ({
+  const result = (Array.isArray(fallbackCats) ? fallbackCats : []).map(cat => ({
     ...cat,
-    subcategories: fallbackSubs.filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
+    subcategories: (Array.isArray(fallbackSubs) ? fallbackSubs : []).filter(sub => String(sub.category_id) === String(cat.id) || sub.category_id == cat.id)
   }));
   res.json(result);
 });
@@ -997,15 +997,33 @@ app.delete('/api/subcategories/:id', async (req, res) => {
 });
 
 // API 5: Collections API
-app.get('/api/collections', (req, res) => {
-  const collections = db.prepare(`
+app.get('/api/collections', async (req, res) => {
+  let collections = await executeMySQL(`
     SELECT col.*, c.name as category_name, c.slug as category_slug
     FROM collections col
     LEFT JOIN categories c ON col.category_id = c.id
     ORDER BY col.id DESC
-  `).all();
+  `);
 
-  const allProds = db.prepare('SELECT id, is_best_product, price_inr, discount_inr, price_usd, discount_usd FROM products').all();
+  let allProds = await executeMySQL('SELECT id, is_best_product, price_inr, discount_inr, price_usd, discount_usd FROM products');
+
+  if (!Array.isArray(collections)) {
+    try {
+      collections = db.prepare(`
+        SELECT col.*, c.name as category_name, c.slug as category_slug
+        FROM collections col
+        LEFT JOIN categories c ON col.category_id = c.id
+        ORDER BY col.id DESC
+      `).all();
+    } catch (e) { collections = []; }
+  }
+
+  if (!Array.isArray(allProds)) {
+    try {
+      allProds = db.prepare('SELECT id, is_best_product, price_inr, discount_inr, price_usd, discount_usd FROM products').all();
+    } catch (e) { allProds = []; }
+  }
+
   const validProdList = Array.isArray(allProds) ? allProds : [];
   const validProdSet = new Set(validProdList.map(p => String(p.id)));
 
@@ -1305,8 +1323,8 @@ app.get('/api/products', async (req, res) => {
   let allVariants = await executeMySQL('SELECT * FROM product_variants ORDER BY id ASC');
   let allColLinks = await executeMySQL('SELECT product_id, collection_id FROM product_collections');
 
-  // ── FALLBACK TO SQLITE ──
-  if (!Array.isArray(products) || products.length === 0) {
+  // ── FALLBACK TO SQLITE (ONLY IF MYSQL QUERY FAILED) ──
+  if (!Array.isArray(products)) {
     try {
       products = db.prepare(sqliteQuery).all(...sqliteParams);
     } catch (e) { products = []; }
@@ -1372,12 +1390,24 @@ app.get('/api/products', async (req, res) => {
     let finalPriceUsd = Number(p.price_usd || 0);
     let finalDiscountInr = Number(p.discount_inr || finalPriceInr || 0);
     let finalDiscountUsd = Number(p.discount_usd || finalPriceUsd || 0);
+    let finalComparePriceInr = Number(p.compare_price_inr || 0);
+    let finalComparePriceUsd = Number(p.compare_price_usd || 0);
 
-    if (finalPriceInr === 0 && variants.length > 0) {
-      finalPriceInr = Number(variants[0].price_inr || variants[0].price || 0);
-      finalPriceUsd = Number(variants[0].price_usd || (finalPriceInr > 0 ? Number((finalPriceInr / 95).toFixed(2)) : 0));
-      finalDiscountInr = Number(variants[0].discount_inr || finalPriceInr);
-      finalDiscountUsd = Number(variants[0].discount_usd || finalPriceUsd);
+    if (variants.length > 0) {
+      const activeVars = variants.filter(v => !v.status || v.status === 'active');
+      const vList = activeVars.length > 0 ? activeVars : variants;
+      const sortedVars = [...vList].sort((a, b) => {
+        const pA = Number(a.discount_inr || a.price_inr || a.price || 0);
+        const pB = Number(b.discount_inr || b.price_inr || b.price || 0);
+        return pA - pB;
+      });
+      const minVar = sortedVars[0] || vList[0];
+      finalPriceInr = Number(minVar.price_inr || minVar.price || 0);
+      finalPriceUsd = Number(minVar.price_usd || (finalPriceInr > 0 ? Number((finalPriceInr / 95).toFixed(2)) : 0));
+      finalDiscountInr = Number(minVar.discount_inr || finalPriceInr);
+      finalDiscountUsd = Number(minVar.discount_usd || finalPriceUsd);
+      finalComparePriceInr = Number(minVar.compare_price_inr || 0);
+      finalComparePriceUsd = Number(minVar.compare_price_usd || 0);
     }
 
     return { 
@@ -1388,6 +1418,8 @@ app.get('/api/products', async (req, res) => {
       price_usd: finalPriceUsd,
       discount_inr: finalDiscountInr,
       discount_usd: finalDiscountUsd,
+      compare_price_inr: finalComparePriceInr,
+      compare_price_usd: finalComparePriceUsd,
       thumbnail: primaryImg,
       image_url: primaryImg,
       images: imagesList.length > 0 ? imagesList : (primaryImg ? [primaryImg] : []),
@@ -1751,12 +1783,24 @@ app.get('/api/products/slug/:slug', async (req, res) => {
   let finalPriceUsd = Number(product.price_usd || 0);
   let finalDiscountInr = Number(product.discount_inr || finalPriceInr || 0);
   let finalDiscountUsd = Number(product.discount_usd || finalPriceUsd || 0);
+  let finalComparePriceInr = Number(product.compare_price_inr || 0);
+  let finalComparePriceUsd = Number(product.compare_price_usd || 0);
 
-  if (finalPriceInr === 0 && variants.length > 0) {
-    finalPriceInr = Number(variants[0].price_inr || variants[0].price || 0);
-    finalPriceUsd = Number(variants[0].price_usd || (finalPriceInr > 0 ? Number((finalPriceInr / 95).toFixed(2)) : 0));
-    finalDiscountInr = Number(variants[0].discount_inr || finalPriceInr);
-    finalDiscountUsd = Number(variants[0].discount_usd || finalPriceUsd);
+  if (variants.length > 0) {
+    const activeVars = variants.filter(v => !v.status || v.status === 'active');
+    const vList = activeVars.length > 0 ? activeVars : variants;
+    const sortedVars = [...vList].sort((a, b) => {
+      const pA = Number(a.discount_inr || a.price_inr || a.price || 0);
+      const pB = Number(b.discount_inr || b.price_inr || b.price || 0);
+      return pA - pB;
+    });
+    const minVar = sortedVars[0] || vList[0];
+    finalPriceInr = Number(minVar.price_inr || minVar.price || 0);
+    finalPriceUsd = Number(minVar.price_usd || (finalPriceInr > 0 ? Number((finalPriceInr / 95).toFixed(2)) : 0));
+    finalDiscountInr = Number(minVar.discount_inr || finalPriceInr);
+    finalDiscountUsd = Number(minVar.discount_usd || finalPriceUsd);
+    finalComparePriceInr = Number(minVar.compare_price_inr || 0);
+    finalComparePriceUsd = Number(minVar.compare_price_usd || 0);
   }
 
   let parsedSpecs = null;
@@ -1774,6 +1818,8 @@ app.get('/api/products/slug/:slug', async (req, res) => {
     price_usd: finalPriceUsd,
     discount_inr: finalDiscountInr,
     discount_usd: finalDiscountUsd,
+    compare_price_inr: finalComparePriceInr,
+    compare_price_usd: finalComparePriceUsd,
     variants,
     images: imagesList,
     image_url: imagesList[0] || product.image_url || product.thumbnail || null,
@@ -1786,9 +1832,29 @@ app.get('/api/products/slug/:slug', async (req, res) => {
 });
 
 // HELPER: Check SKU uniqueness across products & variants
-function isSkuTaken(sku, excludeProductId = null) {
+async function isSkuTaken(sku, excludeProductId = null) {
   if (!sku || typeof sku !== 'string' || !sku.trim()) return false;
   const cleanSku = sku.trim().toLowerCase();
+
+  try {
+    let mysqlProdQuery = 'SELECT id, title FROM products WHERE LOWER(sku) = ?';
+    const mysqlProdParams = [cleanSku];
+    if (excludeProductId) {
+      mysqlProdQuery += ' AND id != ?';
+      mysqlProdParams.push(excludeProductId);
+    }
+    const mysqlProd = await executeMySQL(mysqlProdQuery, mysqlProdParams);
+    if (Array.isArray(mysqlProd) && mysqlProd.length > 0) return mysqlProd[0];
+
+    let mysqlVarQuery = 'SELECT pv.id, p.title FROM product_variants pv LEFT JOIN products p ON pv.product_id = p.id WHERE LOWER(pv.sku) = ?';
+    const mysqlVarParams = [cleanSku];
+    if (excludeProductId) {
+      mysqlVarQuery += ' AND pv.product_id != ?';
+      mysqlVarParams.push(excludeProductId);
+    }
+    const mysqlVar = await executeMySQL(mysqlVarQuery, mysqlVarParams);
+    if (Array.isArray(mysqlVar) && mysqlVar.length > 0) return mysqlVar[0];
+  } catch (e) {}
 
   try {
     let prodQuery = 'SELECT id, title FROM products WHERE LOWER(sku) = ?';
@@ -1814,22 +1880,16 @@ function isSkuTaken(sku, excludeProductId = null) {
 }
 
 function generateUniqueSku(prefix = 'VLE-PROD') {
-  let counter = 101;
-  while (counter < 99999) {
-    const candidate = `${prefix}-${counter}`;
-    if (!isSkuTaken(candidate)) {
-      return candidate;
-    }
-    counter++;
-  }
-  return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+  const randSuffix = Math.floor(100 + Math.random() * 900);
+  const timeHex = Date.now().toString(36).toUpperCase().slice(-4);
+  return `${prefix}-${timeHex}-${randSuffix}`;
 }
 
 // API: Real-time SKU Check Endpoint
-app.get('/api/check-sku', (req, res) => {
+app.get('/api/check-sku', async (req, res) => {
   const { sku, excludeId } = req.query;
   if (!sku) return res.json({ taken: false });
-  const existing = isSkuTaken(sku, excludeId || null);
+  const existing = await isSkuTaken(sku, excludeId || null);
   if (existing) {
     return res.json({ taken: true, productTitle: existing.title || 'Another product' });
   }
@@ -1845,7 +1905,15 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
     is_best_product, seo_keywords, specs_json, images, gst_percent,
     frequently_bought_ids, related_collection_ids, related_mode
   } = req.body;
-  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+  let baseSlug = (title || 'product').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+  if (!baseSlug) baseSlug = `prod-${Date.now().toString(36)}`;
+  let slug = baseSlug;
+  let slugSuffix = 1;
+  while (true) {
+    const checkSqlite = db.prepare('SELECT id FROM products WHERE slug = ?').get(slug);
+    if (!checkSqlite) break;
+    slug = `${baseSlug}-${slugSuffix++}`;
+  }
 
   // Auto-resolve SKU collisions to ensure products always save cleanly without 400 errors
   let inputSku = req.body.sku ? req.body.sku.trim().toUpperCase() : '';
@@ -1966,21 +2034,17 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
     } catch (e) {}
   }
 
-  // Direct MySQL Insert Bridge
-  await executeMySQL(`
+  // Direct MySQL Insert Bridge (creates distinct new product in MySQL)
+  const mysqlInsertRes = await executeMySQL(`
     INSERT INTO products (
-      id, title, slug, sku, barcode, status, vendor, product_type, tags,
+      title, slug, sku, barcode, status, vendor, product_type, tags,
       category_id, subcategory_id, description, price_inr, price_usd, discount_inr, discount_usd,
       compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
       stock, weight, hs_code, country_of_origin, is_best_product, meta_title, meta_description, seo_keywords,
       specs_json, gst_percent, frequently_bought_ids, related_collection_ids, related_mode
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE
-      title=VALUES(title), slug=VALUES(slug), sku=VALUES(sku), status=VALUES(status),
-      price_inr=VALUES(price_inr), price_usd=VALUES(price_usd), discount_inr=VALUES(discount_inr), discount_usd=VALUES(discount_usd),
-      stock=VALUES(stock), category_id=VALUES(category_id), subcategory_id=VALUES(subcategory_id)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
-    productId, title, slug, sku, barcode || null, status || 'Active', vendor || 'VALUELIFE ESSENTIALS', product_type || 'Garden Supplies', cleanTags,
+    title, slug, sku, barcode || null, status || 'Active', vendor || 'VALUELIFE ESSENTIALS', product_type || 'Garden Supplies', cleanTags,
     targetCategoryId, subcategory_id || null, description || '', 
     cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd,
     cleanCompInr, cleanCompUsd, cleanCostInr, cleanCostUsd,
@@ -1991,9 +2055,11 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
     frequently_bought_ids || '', related_collection_ids || '', related_mode || 'PRODUCTS'
   ]);
 
+  const finalProductId = (mysqlInsertRes && mysqlInsertRes.insertId) ? mysqlInsertRes.insertId : productId;
+
   if (cleanImages.length > 0) {
     for (let i = 0; i < cleanImages.length; i++) {
-      await executeMySQL('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)', [productId, cleanImages[i], i === 0 ? 1 : 0]);
+      await executeMySQL('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)', [finalProductId, cleanImages[i], i === 0 ? 1 : 0]);
     }
   }
 
@@ -2009,23 +2075,29 @@ app.post('/api/products', requireAdminAuth, async (req, res) => {
       const vStock = v.stock !== undefined && v.stock !== '' ? Math.max(0, Number(v.stock)) : 50;
       let vImg = v.image_url || v.image || (cleanImages.length > 0 ? cleanImages[0] : null);
       if (typeof vImg === 'object' && vImg?.image_url) vImg = vImg.image_url;
-      await executeMySQL('INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [productId, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vStock, vImg || null]);
+      await executeMySQL('INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [finalProductId, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vStock, vImg || null]);
     }
   }
 
   if (Array.isArray(collection_ids) && collection_ids.length > 0) {
     for (const cId of collection_ids) {
-      await executeMySQL('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)', [productId, Number(cId)]);
+      await executeMySQL('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)', [finalProductId, Number(cId)]);
     }
   }
 
-  res.status(201).json({ id: productId, slug, message: 'Product created successfully' });
+  res.status(201).json({ id: finalProductId, slug, message: 'Product created successfully' });
 });
 
 // Update Product
 app.put('/api/products/:id', requireAdminAuth, async (req, res) => {
   const { id } = req.params;
-  const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+  let existing = null;
+  const mysqlExisting = await executeMySQL('SELECT * FROM products WHERE id = ?', [id]);
+  if (Array.isArray(mysqlExisting) && mysqlExisting.length > 0) {
+    existing = mysqlExisting[0];
+  } else {
+    try { existing = db.prepare('SELECT * FROM products WHERE id = ?').get(id); } catch (e) {}
+  }
   if (!existing) return res.status(404).json({ error: 'Product not found' });
 
   const { 
@@ -2038,61 +2110,77 @@ app.put('/api/products/:id', requireAdminAuth, async (req, res) => {
 
   let cleanReqSku = reqSku && reqSku.trim() ? reqSku.trim().toUpperCase() : null;
   if (cleanReqSku) {
-    const taken = isSkuTaken(cleanReqSku, id);
+    const taken = await isSkuTaken(cleanReqSku, id);
     if (taken) {
       cleanReqSku = `${cleanReqSku}-${Date.now().toString().slice(-4)}`;
     }
   }
   
-  const finalPriceInr = price_inr !== undefined ? Math.max(0, Number(price_inr || 0)) : existing.price_inr;
-  const finalPriceUsd = price_usd !== undefined ? Math.max(0, Number(price_usd)) : (price_inr !== undefined ? Number((finalPriceInr / 95).toFixed(2)) : existing.price_usd);
-  const finalDiscInr = discount_inr !== undefined ? Math.max(0, Number(discount_inr)) : (price_inr !== undefined ? finalPriceInr : existing.discount_inr);
-  const finalDiscUsd = discount_usd !== undefined ? Math.max(0, Number(discount_usd)) : (price_usd !== undefined ? finalPriceUsd : existing.discount_usd);
-  const finalStock = stock !== undefined && stock !== null && stock !== '' ? Math.max(0, Number(stock)) : existing.stock;
+  const finalPriceInr = price_inr !== undefined ? Math.max(0, Number(price_inr || 0)) : Number(existing.price_inr || 0);
+  const finalPriceUsd = price_usd !== undefined ? Math.max(0, Number(price_usd)) : (price_inr !== undefined ? Number((finalPriceInr / 95).toFixed(2)) : Number(existing.price_usd || 0));
+  const finalDiscInr = discount_inr !== undefined ? Math.max(0, Number(discount_inr)) : (price_inr !== undefined ? finalPriceInr : Number(existing.discount_inr || finalPriceInr));
+  const finalDiscUsd = discount_usd !== undefined ? Math.max(0, Number(discount_usd)) : (price_usd !== undefined ? finalPriceUsd : Number(existing.discount_usd || finalPriceUsd));
+  const finalStock = stock !== undefined && stock !== null && stock !== '' ? Math.max(0, Number(stock)) : Number(existing.stock || 0);
   const finalTitle = (title !== undefined && title !== null && String(title).trim() !== '') ? String(title).trim() : existing.title;
-  const finalSlug = (title !== undefined && title !== null && String(title).trim() !== '') 
+  let baseSlug = (title !== undefined && title !== null && String(title).trim() !== '') 
     ? String(title).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
     : existing.slug;
+  if (!baseSlug) baseSlug = `prod-${id}`;
+  let finalSlug = baseSlug;
+  let slugSuffix = 1;
+  while (true) {
+    const checkMysql = await executeMySQL('SELECT id FROM products WHERE slug = ? AND id != ?', [finalSlug, id]);
+    if (Array.isArray(checkMysql) && checkMysql.length > 0) {
+      finalSlug = `${baseSlug}-${slugSuffix++}`;
+      continue;
+    }
+    let checkSqlite = null;
+    try { checkSqlite = db.prepare('SELECT id FROM products WHERE slug = ? AND id != ?').get(finalSlug, id); } catch (e) {}
+    if (!checkSqlite) break;
+    finalSlug = `${baseSlug}-${slugSuffix++}`;
+  }
   const finalSku = cleanReqSku || (reqSku && reqSku.trim() ? reqSku.trim().toUpperCase() : existing.sku);
   const finalCategory = category_id !== undefined ? category_id : existing.category_id;
   const finalSubcategory = subcategory_id !== undefined ? subcategory_id : existing.subcategory_id;
   const finalDesc = description !== undefined ? description : existing.description;
   const finalStatus = status !== undefined ? status : existing.status;
 
-  db.prepare(`
-    UPDATE products
-    SET title = ?, slug = ?, sku = ?, category_id = ?, subcategory_id = ?, description = ?, price_inr = ?, price_usd = ?, 
-        discount_inr = ?, discount_usd = ?, compare_price_inr = ?, compare_price_usd = ?,
-        cost_per_item_inr = ?, cost_per_item_usd = ?, barcode = ?, stock = ?, status = ?, vendor = ?,
-        product_type = ?, tags = ?, weight = ?, hs_code = ?, country_of_origin = ?,
-        is_best_product = ?, seo_keywords = ?, specs_json = ?, gst_percent = ?,
-        frequently_bought_ids = ?, related_collection_ids = ?, related_mode = ?
-    WHERE id = ?
-  `).run(
-    finalTitle, finalSlug, finalSku, finalCategory, finalSubcategory || null, finalDesc, finalPriceInr, finalPriceUsd, 
-    finalDiscInr, finalDiscUsd,
-    compare_price_inr !== undefined && compare_price_inr !== null && compare_price_inr !== '' ? Math.max(0, Number(compare_price_inr)) : existing.compare_price_inr, 
-    compare_price_usd !== undefined && compare_price_usd !== null && compare_price_usd !== '' ? Math.max(0, Number(compare_price_usd)) : existing.compare_price_usd, 
-    cost_per_item_inr !== undefined && cost_per_item_inr !== null && cost_per_item_inr !== '' ? Math.max(0, Number(cost_per_item_inr)) : existing.cost_per_item_inr, 
-    cost_per_item_usd !== undefined && cost_per_item_usd !== null && cost_per_item_usd !== '' ? Math.max(0, Number(cost_per_item_usd)) : existing.cost_per_item_usd,
-    barcode !== undefined ? barcode : existing.barcode, 
-    finalStock, 
-    finalStatus, 
-    vendor !== undefined ? vendor : existing.vendor, 
-    product_type !== undefined ? product_type : existing.product_type,
-    tags !== undefined ? tags : existing.tags, 
-    weight !== undefined ? weight : existing.weight, 
-    hs_code !== undefined ? hs_code : existing.hs_code, 
-    country_of_origin !== undefined ? country_of_origin : existing.country_of_origin,
-    is_best_product !== undefined ? (is_best_product ? 1 : 0) : existing.is_best_product, 
-    seo_keywords !== undefined ? seo_keywords : existing.seo_keywords, 
-    specs_json !== undefined ? (typeof specs_json === 'object' ? JSON.stringify(specs_json) : specs_json) : existing.specs_json,
-    gst_percent !== undefined && gst_percent !== '' ? Number(gst_percent) : existing.gst_percent,
-    frequently_bought_ids !== undefined ? frequently_bought_ids : existing.frequently_bought_ids, 
-    related_collection_ids !== undefined ? related_collection_ids : existing.related_collection_ids, 
-    related_mode !== undefined ? related_mode : existing.related_mode,
-    id
-  );
+  try {
+    db.prepare(`
+      UPDATE products
+      SET title = ?, slug = ?, sku = ?, category_id = ?, subcategory_id = ?, description = ?, price_inr = ?, price_usd = ?, 
+          discount_inr = ?, discount_usd = ?, compare_price_inr = ?, compare_price_usd = ?,
+          cost_per_item_inr = ?, cost_per_item_usd = ?, barcode = ?, stock = ?, status = ?, vendor = ?,
+          product_type = ?, tags = ?, weight = ?, hs_code = ?, country_of_origin = ?,
+          is_best_product = ?, seo_keywords = ?, specs_json = ?, gst_percent = ?,
+          frequently_bought_ids = ?, related_collection_ids = ?, related_mode = ?
+      WHERE id = ?
+    `).run(
+      finalTitle, finalSlug, finalSku, finalCategory, finalSubcategory || null, finalDesc, finalPriceInr, finalPriceUsd, 
+      finalDiscInr, finalDiscUsd,
+      compare_price_inr !== undefined && compare_price_inr !== null && compare_price_inr !== '' ? Math.max(0, Number(compare_price_inr)) : existing.compare_price_inr, 
+      compare_price_usd !== undefined && compare_price_usd !== null && compare_price_usd !== '' ? Math.max(0, Number(compare_price_usd)) : existing.compare_price_usd, 
+      cost_per_item_inr !== undefined && cost_per_item_inr !== null && cost_per_item_inr !== '' ? Math.max(0, Number(cost_per_item_inr)) : existing.cost_per_item_inr, 
+      cost_per_item_usd !== undefined && cost_per_item_usd !== null && cost_per_item_usd !== '' ? Math.max(0, Number(cost_per_item_usd)) : existing.cost_per_item_usd,
+      barcode !== undefined ? barcode : existing.barcode, 
+      finalStock, 
+      finalStatus, 
+      vendor !== undefined ? vendor : existing.vendor, 
+      product_type !== undefined ? product_type : existing.product_type,
+      tags !== undefined ? tags : existing.tags, 
+      weight !== undefined ? weight : existing.weight, 
+      hs_code !== undefined ? hs_code : existing.hs_code, 
+      country_of_origin !== undefined ? country_of_origin : existing.country_of_origin,
+      is_best_product !== undefined ? (is_best_product ? 1 : 0) : existing.is_best_product, 
+      seo_keywords !== undefined ? seo_keywords : existing.seo_keywords, 
+      specs_json !== undefined ? (typeof specs_json === 'object' ? JSON.stringify(specs_json) : specs_json) : existing.specs_json,
+      gst_percent !== undefined && gst_percent !== '' ? Number(gst_percent) : existing.gst_percent,
+      frequently_bought_ids !== undefined ? frequently_bought_ids : existing.frequently_bought_ids, 
+      related_collection_ids !== undefined ? related_collection_ids : existing.related_collection_ids, 
+      related_mode !== undefined ? related_mode : existing.related_mode,
+      id
+    );
+  } catch (e) {}
 
   // Direct MySQL Update
   await executeMySQL(`
@@ -2142,48 +2230,70 @@ app.put('/api/products/:id', requireAdminAuth, async (req, res) => {
       })
       .filter(Boolean);
 
-    db.prepare('DELETE FROM product_images WHERE product_id = ?').run(id);
+    try { db.prepare('DELETE FROM product_images WHERE product_id = ?').run(id); } catch (e) {}
     await executeMySQL('DELETE FROM product_images WHERE product_id = ?', [id]);
 
     if (cleanImages.length > 0) {
-      const imgStmt = db.prepare('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)');
-      cleanImages.forEach((imgUrl, idx) => imgStmt.run(id, imgUrl, idx === 0 ? 1 : 0));
+      try {
+        const imgStmt = db.prepare('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)');
+        cleanImages.forEach((imgUrl, idx) => imgStmt.run(id, imgUrl, idx === 0 ? 1 : 0));
+      } catch (e) {}
       for (let i = 0; i < cleanImages.length; i++) {
         await executeMySQL('INSERT INTO product_images (product_id, image_url, is_primary) VALUES (?, ?, ?)', [id, cleanImages[i], i === 0 ? 1 : 0]);
       }
       
       const primaryImg = cleanImages[0];
-      try {
-        db.prepare('UPDATE products SET image_url = ?, thumbnail = ? WHERE id = ?').run(primaryImg, primaryImg, id);
-      } catch (e) {}
+      try { db.prepare('UPDATE products SET image_url = ?, thumbnail = ? WHERE id = ?').run(primaryImg, primaryImg, id); } catch (e) {}
+      await executeMySQL('UPDATE products SET image_url = ?, thumbnail = ? WHERE id = ?', [primaryImg, primaryImg, id]);
     }
   }
 
   const rawVariants = variants || req.body.variants;
   if (rawVariants && Array.isArray(rawVariants)) {
-    db.prepare('DELETE FROM product_variants WHERE product_id = ?').run(id);
+    try { db.prepare('DELETE FROM product_variants WHERE product_id = ?').run(id); } catch (e) {}
     await executeMySQL('DELETE FROM product_variants WHERE product_id = ?', [id]);
 
-    const varStmt = db.prepare(`
-      INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, compare_price_inr, compare_price_usd, stock, image_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    try {
+      const varStmt = db.prepare(`
+        INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, compare_price_inr, compare_price_usd, stock, image_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const v of rawVariants) {
+        if (!v) continue;
+        const vName = String(v.variant_name || v.title || v.name || 'Standard Pack').trim();
+        const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `VLE-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        const vPriceInr = Math.max(0, Number(v.price_inr || v.price || finalPriceInr || 0));
+        const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Math.max(0, Number(v.price_usd)) : Number((vPriceInr / 95).toFixed(2));
+        const vDiscInr = (v.discount_inr && Number(v.discount_inr) > 0 && Number(v.discount_inr) < vPriceInr) ? Math.max(0, Number(v.discount_inr)) : vPriceInr;
+        const vDiscUsd = (v.discount_usd && Number(v.discount_usd) > 0 && Number(v.discount_usd) < vPriceUsd) ? Math.max(0, Number(v.discount_usd)) : vPriceUsd;
+        const vCompInr = (v.compare_price_inr !== undefined && v.compare_price_inr !== null && v.compare_price_inr !== '') ? Math.max(0, Number(v.compare_price_inr)) : null;
+        const vCompUsd = (v.compare_price_usd !== undefined && v.compare_price_usd !== null && v.compare_price_usd !== '') ? Math.max(0, Number(v.compare_price_usd)) : (vCompInr > 0 ? Number((vCompInr / 95).toFixed(2)) : null);
+        const vStock = v.stock !== undefined && v.stock !== '' ? Math.max(0, Number(v.stock)) : 50;
+        let vImg = v.image_url || v.image || null;
+        if (typeof vImg === 'object' && vImg?.image_url) vImg = vImg.image_url;
+
+        varStmt.run(id, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vCompInr || null, vCompUsd || null, vStock, vImg || null);
+      }
+    } catch (e) {}
+
     for (const v of rawVariants) {
       if (!v) continue;
       const vName = String(v.variant_name || v.title || v.name || 'Standard Pack').trim();
-      const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const vSku = (v.sku && String(v.sku).trim()) ? String(v.sku).trim().toUpperCase() : `VLE-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       const vPriceInr = Math.max(0, Number(v.price_inr || v.price || finalPriceInr || 0));
       const vPriceUsd = (v.price_usd !== undefined && v.price_usd !== '' && Number(v.price_usd) > 0) ? Math.max(0, Number(v.price_usd)) : Number((vPriceInr / 95).toFixed(2));
       const vDiscInr = (v.discount_inr && Number(v.discount_inr) > 0 && Number(v.discount_inr) < vPriceInr) ? Math.max(0, Number(v.discount_inr)) : vPriceInr;
       const vDiscUsd = (v.discount_usd && Number(v.discount_usd) > 0 && Number(v.discount_usd) < vPriceUsd) ? Math.max(0, Number(v.discount_usd)) : vPriceUsd;
       const vCompInr = (v.compare_price_inr !== undefined && v.compare_price_inr !== null && v.compare_price_inr !== '') ? Math.max(0, Number(v.compare_price_inr)) : null;
-      const vCompUsd = (v.compare_price_usd !== undefined && v.compare_price_usd !== null && v.compare_price_usd !== '' && Number(v.compare_price_usd) > 0) ? Math.max(0, Number(v.compare_price_usd)) : (vCompInr > 0 ? Number((vCompInr / 95).toFixed(2)) : null);
+      const vCompUsd = (v.compare_price_usd !== undefined && v.compare_price_usd !== null && v.compare_price_usd !== '') ? Math.max(0, Number(v.compare_price_usd)) : (vCompInr > 0 ? Number((vCompInr / 95).toFixed(2)) : null);
       const vStock = v.stock !== undefined && v.stock !== '' ? Math.max(0, Number(v.stock)) : 50;
       let vImg = v.image_url || v.image || null;
       if (typeof vImg === 'object' && vImg?.image_url) vImg = vImg.image_url;
 
-      varStmt.run(id, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vCompInr || null, vCompUsd || null, vStock, vImg || null);
-      await executeMySQL('INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vStock, vImg || null]);
+      await executeMySQL(
+        'INSERT INTO product_variants (product_id, title, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, compare_price_inr, compare_price_usd, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, vName, vName, vSku, vPriceInr, vPriceUsd, vDiscInr, vDiscUsd, vCompInr, vCompUsd, vStock, vImg || null]
+      );
     }
   }
 
@@ -2191,31 +2301,39 @@ app.put('/api/products/:id', requireAdminAuth, async (req, res) => {
   if (collection_ids && Array.isArray(collection_ids)) {
     try {
       db.prepare('DELETE FROM product_collections WHERE product_id = ?').run(id);
-      await executeMySQL('DELETE FROM product_collections WHERE product_id = ?', [id]);
+    } catch (e) {}
+    await executeMySQL('DELETE FROM product_collections WHERE product_id = ?', [id]);
+    
+    try {
       const pcStmt = db.prepare('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)');
       for (const cId of collection_ids) {
         try { pcStmt.run(id, Number(cId)); } catch (e) {}
-        await executeMySQL('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)', [id, Number(cId)]);
       }
     } catch (e) {}
+
+    for (const cId of collection_ids) {
+      await executeMySQL('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)', [id, Number(cId)]);
+    }
   }
 
-  res.json({ message: 'Product updated successfully in database' });
+  res.json({ message: 'Product updated successfully in database', success: true });
 });
 
 // Update Product Stock directly
-app.put('/api/products/:id/stock', (req, res) => {
+app.put('/api/products/:id/stock', async (req, res) => {
   const { id } = req.params;
   const { stock } = req.body;
-  db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(Number(stock), id);
+  try { db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(Number(stock), id); } catch (e) {}
+  await executeMySQL('UPDATE products SET stock = ? WHERE id = ?', [Number(stock), id]);
   res.json({ message: 'Product stock updated' });
 });
 
 // Update Variant Stock directly
-app.put('/api/variants/:id/stock', (req, res) => {
+app.put('/api/variants/:id/stock', async (req, res) => {
   const { id } = req.params;
   const { stock } = req.body;
-  db.prepare('UPDATE product_variants SET stock = ? WHERE id = ?').run(Number(stock), id);
+  try { db.prepare('UPDATE product_variants SET stock = ? WHERE id = ?').run(Number(stock), id); } catch (e) {}
+  await executeMySQL('UPDATE product_variants SET stock = ? WHERE id = ?', [Number(stock), id]);
   res.json({ message: 'Variant stock updated' });
 });
 
@@ -2223,28 +2341,29 @@ app.put('/api/variants/:id/stock', (req, res) => {
 app.post('/api/products/:id/variants', async (req, res) => {
   const { id } = req.params;
   const { variant_name, price_inr, price_usd, discount_inr, discount_usd, stock, image_url } = req.body;
-  const sku = req.body.sku || `OB-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const sku = req.body.sku || `VLE-VAR-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
   const cleanPriceInr = Number(price_inr || 0);
   const cleanPriceUsd = price_usd !== undefined && price_usd !== '' && Number(price_usd) > 0 ? Number(price_usd) : Number((cleanPriceInr / 95).toFixed(2));
   const cleanDiscInr = discount_inr !== undefined && discount_inr !== '' && Number(discount_inr) > 0 ? Number(discount_inr) : cleanPriceInr;
   const cleanDiscUsd = discount_usd !== undefined && discount_usd !== '' && Number(discount_usd) > 0 ? Number(discount_usd) : cleanPriceUsd;
 
-  let insertId = Date.now();
+  let insertId = null;
+  const mysqlRes = await executeMySQL(`
+    INSERT INTO product_variants (product_id, title, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [id, variant_name, variant_name, sku, cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd, stock || 50, image_url || null]);
+  if (mysqlRes && mysqlRes.insertId) insertId = mysqlRes.insertId;
+
   try {
     const result = db.prepare(`
       INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, variant_name, sku, cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd, stock || 50, image_url || null);
-    if (result && result.lastInsertRowid) insertId = result.lastInsertRowid;
+    if (!insertId && result && result.lastInsertRowid) insertId = result.lastInsertRowid;
   } catch (e) {}
 
-  await executeMySQL(`
-    INSERT INTO product_variants (product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, stock, image_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [id, variant_name, sku, cleanPriceInr, cleanPriceUsd, cleanDiscInr, cleanDiscUsd, stock || 50, image_url || null]);
-
-  res.status(201).json({ id: insertId, message: 'Variant added' });
+  res.status(201).json({ id: insertId || Date.now(), message: 'Variant added' });
 });
 
 app.delete('/api/variants/:id', async (req, res) => {
@@ -4062,15 +4181,24 @@ app.post('/api/auth/reset-password', (req, res) => {
 });
 
 // PRODUCT FILTER GROUPS & OPTIONS API
-app.get(['/api/filter-groups', '/api/admin/filter-groups'], (req, res) => {
-  const groups = db.prepare('SELECT * FROM product_filter_groups WHERE is_active = 1 OR is_active IS NULL ORDER BY sort_order ASC, id ASC').all();
+app.get(['/api/filter-groups', '/api/admin/filter-groups'], async (req, res) => {
+  let groups = await executeMySQL('SELECT * FROM product_filter_groups WHERE is_active = 1 OR is_active IS NULL ORDER BY sort_order ASC, id ASC');
+  let options = await executeMySQL('SELECT * FROM product_filter_options ORDER BY sort_order ASC, id ASC');
+
+  if (Array.isArray(groups)) {
+    const result = groups.map(grp => ({
+      ...grp,
+      options: (Array.isArray(options) ? options : []).filter(o => o.group_id == grp.id)
+    }));
+    return res.json(result);
+  }
+
+  const fallbackGroups = db.prepare('SELECT * FROM product_filter_groups WHERE is_active = 1 OR is_active IS NULL ORDER BY sort_order ASC, id ASC').all();
   const optionStmt = db.prepare('SELECT * FROM product_filter_options WHERE group_id = ? ORDER BY sort_order ASC, id ASC');
-  
-  const result = groups.map(grp => ({
+  const result = (Array.isArray(fallbackGroups) ? fallbackGroups : []).map(grp => ({
     ...grp,
     options: optionStmt.all(grp.id)
   }));
-
   res.json(result);
 });
 
@@ -4082,16 +4210,19 @@ app.post('/api/admin/filter-groups', async (req, res) => {
     ? String(filter_key).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_') 
     : String(name).trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
   
-  let grpId = Date.now();
+  let grpId = null;
+  const mysqlRes = await executeMySQL(
+    'INSERT INTO product_filter_groups (name, filter_key, sort_order, is_active) VALUES (?, ?, ?, 1)',
+    [String(name).trim(), key, sort_order || 0]
+  );
+  if (mysqlRes && mysqlRes.insertId) {
+    grpId = mysqlRes.insertId;
+  }
+
   try {
     const result = db.prepare('INSERT INTO product_filter_groups (name, filter_key, sort_order, is_active) VALUES (?, ?, ?, 1)').run(String(name).trim(), key, sort_order || 0);
-    grpId = result.lastInsertRowid;
+    if (!grpId) grpId = result.lastInsertRowid;
   } catch (err) {}
-
-  await executeMySQL(
-    'INSERT INTO product_filter_groups (id, name, filter_key, sort_order, is_active) VALUES (?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE name=VALUES(name), filter_key=VALUES(filter_key), sort_order=VALUES(sort_order)',
-    [grpId, String(name).trim(), key, sort_order || 0]
-  );
 
   res.status(201).json({ id: grpId, name: String(name).trim(), filter_key: key, message: 'Filter group created' });
 });
@@ -4130,16 +4261,19 @@ app.delete('/api/admin/filter-groups/:id', async (req, res) => {
 app.post('/api/admin/filter-options', async (req, res) => {
   const { group_id, label, value, sort_order } = req.body;
   const optValue = value ? value.toLowerCase().replace(/[^a-z0-9_]+/g, '_') : label.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
-  let optId = Date.now();
+  let optId = null;
+  const mysqlRes = await executeMySQL(
+    'INSERT INTO product_filter_options (group_id, label, value, sort_order) VALUES (?, ?, ?, ?)',
+    [group_id, label, optValue, sort_order || 0]
+  );
+  if (mysqlRes && mysqlRes.insertId) {
+    optId = mysqlRes.insertId;
+  }
+
   try {
     const result = db.prepare('INSERT INTO product_filter_options (group_id, label, value, sort_order) VALUES (?, ?, ?, ?)').run(group_id, label, optValue, sort_order || 0);
-    optId = result.lastInsertRowid;
+    if (!optId) optId = result.lastInsertRowid;
   } catch (e) {}
-
-  await executeMySQL(
-    'INSERT INTO product_filter_options (id, group_id, label, value, sort_order) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE label=VALUES(label), value=VALUES(value), sort_order=VALUES(sort_order)',
-    [optId, group_id, label, optValue, sort_order || 0]
-  );
 
   res.status(201).json({ id: optId, message: 'Filter option added' });
 });

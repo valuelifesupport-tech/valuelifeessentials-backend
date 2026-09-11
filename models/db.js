@@ -78,9 +78,9 @@ const defaultSubcategories = [
 ];
 
 let fallbackStore = {
-  categories: [...defaultCategories],
-  subcategories: [...defaultSubcategories],
-  collections: [...defaultCollections],
+  categories: [],
+  subcategories: [],
+  collections: [],
   products: [],
   product_variants: [],
   product_images: [],
@@ -105,9 +105,9 @@ try {
     const raw = fs.readFileSync(fallbackDbFile, 'utf8');
     const parsed = JSON.parse(raw);
     fallbackStore = { ...fallbackStore, ...parsed };
-    if (!Array.isArray(fallbackStore.categories)) fallbackStore.categories = [...defaultCategories];
-    if (!Array.isArray(fallbackStore.subcategories)) fallbackStore.subcategories = [...defaultSubcategories];
-    if (!Array.isArray(fallbackStore.collections)) fallbackStore.collections = [...defaultCollections];
+    if (!Array.isArray(fallbackStore.categories)) fallbackStore.categories = [];
+    if (!Array.isArray(fallbackStore.subcategories)) fallbackStore.subcategories = [];
+    if (!Array.isArray(fallbackStore.collections)) fallbackStore.collections = [];
     if (!fallbackStore.product_collections) fallbackStore.product_collections = [];
   } else {
     fs.writeFileSync(fallbackDbFile, JSON.stringify(fallbackStore, null, 2));
@@ -121,6 +121,18 @@ function saveFallbackStore() {
   } catch (e) {}
 }
 
+function getNextFallbackId(collectionName) {
+  const items = (fallbackStore && fallbackStore[collectionName]) || [];
+  let maxId = 0;
+  for (const item of items) {
+    const num = Number(item.id);
+    if (!isNaN(num) && num < 1000000 && num > maxId) {
+      maxId = num;
+    }
+  }
+  return Math.max(maxId, 40) + 1;
+}
+
 const dbPath = path.join(__dirname, 'ecommerce.db');
 const db = Database ? new Database(dbPath) : {
   pragma: () => {},
@@ -130,7 +142,16 @@ const db = Database ? new Database(dbPath) : {
     
     return {
       run: (...params) => {
-        const nowId = Date.now();
+        let targetTable = 'misc';
+        if (s.includes('categories')) targetTable = 'categories';
+        else if (s.includes('subcategories')) targetTable = 'subcategories';
+        else if (s.includes('products')) targetTable = 'products';
+        else if (s.includes('product_images')) targetTable = 'product_images';
+        else if (s.includes('product_variants')) targetTable = 'product_variants';
+        else if (s.includes('collections')) targetTable = 'collections';
+        else if (s.includes('coupons')) targetTable = 'coupons';
+        else if (s.includes('orders')) targetTable = 'orders';
+        const nowId = getNextFallbackId(targetTable);
         if (s.includes('insert into categories')) {
           const [name, slug, description, image_url, icon] = params;
           const newCat = { id: nowId, name, slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), description: description || '', image_url: image_url || '', icon: icon || '🌿' };
@@ -176,10 +197,57 @@ const db = Database ? new Database(dbPath) : {
         }
         if (s.includes('insert into collections')) {
           const [name, slug, description, image_url, category_id] = params;
-          const newColl = { id: nowId, name, slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), description: description || '', image_url: image_url || '', category_id: category_id || 1 };
+          const newColl = { id: nowId, name, slug: slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), description: description || '', image_url: image_url || '', category_id: category_id || 1, show_in_navbar: 0 };
+          if (!fallbackStore.collections) fallbackStore.collections = [];
           fallbackStore.collections.push(newColl);
           saveFallbackStore();
           return { lastInsertRowid: nowId, changes: 1 };
+        }
+        if (s.includes('update collections') && s.includes('show_in_navbar =') && s.includes('image_url =')) {
+          const [name, slug, description, image_url, category_id, show_in_navbar, id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.map(c => 
+              String(c.id) === String(id) ? { ...c, name, slug: slug || c.slug, description: description || '', image_url: image_url || c.image_url, category_id: category_id || c.category_id, show_in_navbar: show_in_navbar !== undefined ? show_in_navbar : c.show_in_navbar } : c
+            );
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('update collections') && s.includes('image_url =')) {
+          const [name, slug, description, image_url, category_id, id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.map(c => 
+              String(c.id) === String(id) ? { ...c, name, slug: slug || c.slug, description: description || '', image_url: image_url || c.image_url, category_id: category_id || c.category_id } : c
+            );
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('update collections set show_in_navbar =')) {
+          const [show_in_navbar, id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.map(c => 
+              String(c.id) === String(id) ? { ...c, show_in_navbar } : c
+            );
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('delete from collections where id =')) {
+          const [id] = params;
+          if (fallbackStore.collections) {
+            fallbackStore.collections = fallbackStore.collections.filter(c => String(c.id) !== String(id));
+            saveFallbackStore();
+          }
+          return { changes: 1 };
+        }
+        if (s.includes('delete from product_collections where collection_id =')) {
+          const [collection_id] = params;
+          if (fallbackStore.product_collections) {
+            fallbackStore.product_collections = fallbackStore.product_collections.filter(pc => String(pc.collection_id) !== String(collection_id));
+            saveFallbackStore();
+          }
+          return { changes: 1 };
         }
         if (s.includes('insert into product_collections')) {
           const [product_id, collection_id] = params;
@@ -216,18 +284,100 @@ const db = Database ? new Database(dbPath) : {
           saveFallbackStore();
           return { lastInsertRowid: nowId, changes: 1 };
         }
-        if (s.includes('delete from products where id =')) {
-          const [id] = params;
-          fallbackStore.products = fallbackStore.products.filter(p => String(p.id) !== String(id));
-          if (fallbackStore.product_collections) {
-            fallbackStore.product_collections = fallbackStore.product_collections.filter(pc => String(pc.product_id) !== String(id));
+        if (s.includes('insert into product_variants')) {
+          const [product_id, variant_name, sku, price_inr, price_usd, discount_inr, discount_usd, compare_price_inr, compare_price_usd, stock, image_url] = params;
+          if (!fallbackStore.product_variants) fallbackStore.product_variants = [];
+          fallbackStore.product_variants.push({
+            id: nowId,
+            product_id: Number(product_id),
+            variant_name: variant_name || 'Standard Pack',
+            sku: sku || `OB-VAR-${nowId}`,
+            price_inr: Number(price_inr || 0),
+            price_usd: Number(price_usd || (price_inr > 0 ? Number((price_inr/95).toFixed(2)) : 0)),
+            discount_inr: Number(discount_inr || price_inr || 0),
+            discount_usd: Number(discount_usd || price_usd || 0),
+            compare_price_inr: compare_price_inr ? Number(compare_price_inr) : null,
+            compare_price_usd: compare_price_usd ? Number(compare_price_usd) : null,
+            stock: Number(stock || 50),
+            image_url: image_url || null
+          });
+          saveFallbackStore();
+          return { lastInsertRowid: nowId, changes: 1 };
+        }
+        if (s.includes('delete from product_variants')) {
+          if (s.includes('where product_id =')) {
+            const [product_id] = params;
+            fallbackStore.product_variants = (fallbackStore.product_variants || []).filter(v => String(v.product_id) !== String(product_id));
+          } else if (s.includes('where id =')) {
+            const [id] = params;
+            fallbackStore.product_variants = (fallbackStore.product_variants || []).filter(v => String(v.id) !== String(id));
+          } else {
+            fallbackStore.product_variants = [];
           }
           saveFallbackStore();
           return { changes: 1 };
         }
-        if (s.includes('delete from categories where id =')) {
-          const [id] = params;
-          fallbackStore.categories = fallbackStore.categories.filter(c => String(c.id) !== String(id));
+        if (s.includes('delete from product_images')) {
+          fallbackStore.product_images = [];
+          saveFallbackStore();
+          return { changes: 1 };
+        }
+        if (s.includes('delete from product_collections')) {
+          fallbackStore.product_collections = [];
+          saveFallbackStore();
+          return { changes: 1 };
+        }
+        if (s.includes('delete from products')) {
+          if (s.includes('where id =')) {
+            const [id] = params;
+            fallbackStore.products = (fallbackStore.products || []).filter(p => String(p.id) !== String(id));
+            if (fallbackStore.product_collections) {
+              fallbackStore.product_collections = fallbackStore.product_collections.filter(pc => String(pc.product_id) !== String(id));
+            }
+          } else {
+            fallbackStore.products = [];
+            fallbackStore.product_collections = [];
+          }
+          saveFallbackStore();
+          return { changes: 1 };
+        }
+        if (s.includes('delete from subcategories')) {
+          if (s.includes('where id =')) {
+            const [id] = params;
+            fallbackStore.subcategories = (fallbackStore.subcategories || []).filter(sub => String(sub.id) !== String(id));
+          } else {
+            fallbackStore.subcategories = [];
+          }
+          saveFallbackStore();
+          return { changes: 1 };
+        }
+        if (s.includes('delete from collections')) {
+          if (s.includes('where id =')) {
+            const [id] = params;
+            fallbackStore.collections = (fallbackStore.collections || []).filter(c => String(c.id) !== String(id));
+          } else {
+            fallbackStore.collections = [];
+          }
+          saveFallbackStore();
+          return { changes: 1 };
+        }
+        if (s.includes('delete from categories')) {
+          if (s.includes('where id =')) {
+            const [id] = params;
+            fallbackStore.categories = (fallbackStore.categories || []).filter(c => String(c.id) !== String(id));
+          } else {
+            fallbackStore.categories = [];
+          }
+          saveFallbackStore();
+          return { changes: 1 };
+        }
+        if (s.includes('delete from product_filter_options')) {
+          fallbackStore.product_filter_options = [];
+          saveFallbackStore();
+          return { changes: 1 };
+        }
+        if (s.includes('delete from product_filter_groups')) {
+          fallbackStore.product_filter_groups = [];
           saveFallbackStore();
           return { changes: 1 };
         }
@@ -238,19 +388,29 @@ const db = Database ? new Database(dbPath) : {
         if (s.includes('store_theme_config')) return fallbackStore.store_theme_config;
         if (s.includes('store_sections_config')) return fallbackStore.store_sections_config;
         if (s.includes('store_settings')) return fallbackStore.store_settings;
-        if (s.includes('from products where id =')) {
-          const [id] = params;
-          return fallbackStore.products.find(p => String(p.id) === String(id)) || null;
+        if (s.includes('from products')) {
+          const [p1, p2, p3] = params;
+          const searchVal = String(p1 || '').toLowerCase();
+          return (fallbackStore.products || []).find(p => 
+            String(p.id) === String(p1) || 
+            String(p.slug || '').toLowerCase() === searchVal ||
+            String(p.slug || '').toLowerCase() === String(p2 || '').toLowerCase() ||
+            String(p.id) === String(p3 || '') ||
+            String(p.title || '').toLowerCase() === searchVal
+          ) || null;
         }
         if (s.includes('from collections where')) {
           const [p1] = params;
-          return fallbackStore.collections.find(c => String(c.slug).toLowerCase() === String(p1).toLowerCase() || String(c.id) === String(p1)) || null;
+          return (fallbackStore.collections || []).find(c => String(c.slug).toLowerCase() === String(p1).toLowerCase() || String(c.id) === String(p1)) || null;
         }
         if (s.includes('from users where')) {
           const [p1, p2] = params;
-          return fallbackStore.users.find(u => String(u.phone) === String(p1) || String(u.email).toLowerCase() === String(p2).toLowerCase()) || null;
+          return (fallbackStore.users || []).find(u => String(u.phone) === String(p1) || String(u.email).toLowerCase() === String(p2).toLowerCase()) || null;
         }
-        return { count: 0, cnt: 0 };
+        if (s.includes('count(') || s.includes('avg(')) {
+          return { count: 0, cnt: 0, avg_rating: 0, total_reviews: 0 };
+        }
+        return null;
       },
       all: (...params) => {
         if (s.includes('from categories')) return fallbackStore.categories || [];
