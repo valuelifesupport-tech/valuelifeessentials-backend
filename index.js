@@ -1517,7 +1517,7 @@ try {
 } catch (e) {}
 
 // Single Product Detail by Slug or ID (DUAL ENGINE: MYSQL-FIRST + SQLITE FALLBACK)
-app.get('/api/products/slug/:slug', async (req, res) => {
+app.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res) => {
   const { slug } = req.params;
   let decodedSlug = slug;
   try {
