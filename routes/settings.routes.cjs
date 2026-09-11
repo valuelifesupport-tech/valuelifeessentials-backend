@@ -1,0 +1,253 @@
+const express = require('express');
+const router = express.Router();
+const { db, executeMySQL } = require('../config/database.cjs');
+const { requireAdminAuth } = require('../middleware/auth.cjs');
+
+// GET Store Settings
+router.get('/api/settings', async (req, res) => {
+  try {
+    const myRows = await executeMySQL('SELECT * FROM store_settings WHERE id = 1');
+    if (myRows && myRows.length > 0) {
+      return res.json(myRows[0]);
+    }
+    const row = db.prepare('SELECT * FROM store_settings WHERE id = 1').get();
+    if (row) return res.json(row);
+
+    res.json({
+      id: 1,
+      announcement_text: 'Free Express Shipping Across India on Orders Above ₹499!',
+      announcement_code: 'VALUELIFE15',
+      contact_phone: '+91 76759 41899, +91 78931 00755',
+      contact_email: 'valuelifesupport@gmail.com',
+      partial_deposit_percent: 20,
+      enable_multi_currency: 1,
+      enable_cod: 1,
+      enable_partial_payment: 1,
+      prepaid_discount_percent: 5,
+      enable_gst: 1,
+      gstin_number: '27AAAAA0000A1Z5'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Update Store Settings
+router.put('/api/settings', requireAdminAuth, async (req, res) => {
+  try {
+    const fields = req.body;
+    const keys = Object.keys(fields).filter(k => k !== 'id');
+    if (keys.length === 0) return res.json({ success: true });
+
+    // Update MySQL
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    const vals = keys.map(k => fields[k]);
+    await executeMySQL(`UPDATE store_settings SET ${setSql} WHERE id = 1`, vals);
+
+    // Update SQLite
+    try {
+      db.prepare(`UPDATE store_settings SET ${setSql} WHERE id = 1`).run(...vals);
+    } catch (e) {}
+
+    res.json({ success: true, message: 'Settings updated' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Currency Detect
+router.get('/api/currency/detect', (req, res) => {
+  res.json({ currency: 'INR', symbol: '₹', isIndia: true });
+});
+
+// GET Hero Config
+router.get('/api/hero-config', async (req, res) => {
+  try {
+    let row = await executeMySQL('SELECT * FROM store_hero_config WHERE id = 1');
+    if (row && row.length > 0) return res.json(row[0]);
+    row = db.prepare('SELECT * FROM store_hero_config WHERE id = 1').get();
+    res.json(row || {
+      id: 1,
+      headline: 'Better Choices Better Life.',
+      subheadline: 'Discover natural, healthy and premium products for a smarter, happier everyday life.',
+      badge_text: 'NATURAL • HEALTHY • SUSTAINABLE',
+      primary_cta_text: 'Shop Now',
+      primary_cta_link: '/products'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Hero Config
+router.put('/api/admin/hero-config', requireAdminAuth, async (req, res) => {
+  try {
+    const fields = req.body;
+    const keys = Object.keys(fields).filter(k => k !== 'id');
+    if (keys.length === 0) return res.json({ success: true });
+
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    const vals = keys.map(k => fields[k]);
+    await executeMySQL(`UPDATE store_hero_config SET ${setSql} WHERE id = 1`, vals);
+    try {
+      db.prepare(`UPDATE store_hero_config SET ${setSql} WHERE id = 1`).run(...vals);
+    } catch (e) {}
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET Theme Config
+router.get('/api/theme-config', async (req, res) => {
+  try {
+    let row = await executeMySQL('SELECT * FROM store_theme_config WHERE id = 1');
+    if (row && row.length > 0) return res.json(row[0]);
+    row = db.prepare('SELECT * FROM store_theme_config WHERE id = 1').get();
+    res.json(row || {
+      id: 1,
+      primary_color: '#164e3f',
+      secondary_color: '#52b788',
+      font_family: 'Outfit, Inter, sans-serif'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Theme Config
+router.put('/api/admin/theme-config', requireAdminAuth, async (req, res) => {
+  try {
+    const fields = req.body;
+    const keys = Object.keys(fields).filter(k => k !== 'id');
+    if (keys.length === 0) return res.json({ success: true });
+
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    const vals = keys.map(k => fields[k]);
+    await executeMySQL(`UPDATE store_theme_config SET ${setSql} WHERE id = 1`, vals);
+    try {
+      db.prepare(`UPDATE store_theme_config SET ${setSql} WHERE id = 1`).run(...vals);
+    } catch (e) {}
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET Sections Config
+router.get(['/api/sections-config', '/api/admin/sections-config'], async (req, res) => {
+  try {
+    let row = await executeMySQL('SELECT * FROM store_sections_config WHERE id = 1');
+    if (row && row.length > 0) return res.json(row[0]);
+    row = db.prepare('SELECT * FROM store_sections_config WHERE id = 1').get();
+    res.json(row || {
+      id: 1,
+      show_announcement_bar: 1,
+      show_hero: 1,
+      show_categories: 1,
+      show_featured_products: 1,
+      show_editorial_promo: 1,
+      show_why_choose_us: 1,
+      show_bestsellers: 1,
+      show_brand_story: 1,
+      show_testimonials: 1,
+      show_instagram_feed: 1,
+      show_newsletter: 1,
+      show_footer: 1
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Sections Config
+router.put(['/api/sections-config', '/api/admin/sections-config'], requireAdminAuth, async (req, res) => {
+  try {
+    const fields = req.body;
+    const keys = Object.keys(fields).filter(k => k !== 'id');
+    if (keys.length === 0) return res.json({ success: true });
+
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    const vals = keys.map(k => fields[k]);
+    await executeMySQL(`UPDATE store_sections_config SET ${setSql} WHERE id = 1`, vals);
+    try {
+      db.prepare(`UPDATE store_sections_config SET ${setSql} WHERE id = 1`).run(...vals);
+    } catch (e) {}
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET State Taxes
+router.get('/api/admin/taxes/states', async (req, res) => {
+  try {
+    let rows = await executeMySQL('SELECT * FROM state_tax_rates ORDER BY state_name ASC');
+    if (!rows || rows.length === 0) {
+      rows = db.prepare('SELECT * FROM state_tax_rates ORDER BY state_name ASC').all() || [];
+    }
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT State Taxes
+router.put('/api/admin/taxes/states', requireAdminAuth, async (req, res) => {
+  try {
+    const { states } = req.body;
+    if (Array.isArray(states)) {
+      for (const st of states) {
+        await executeMySQL('UPDATE state_tax_rates SET tax_rate = ?, tax_label = ? WHERE id = ?', [st.tax_rate, st.tax_label, st.id]);
+        try {
+          db.prepare('UPDATE state_tax_rates SET tax_rate = ?, tax_label = ? WHERE id = ?').run(st.tax_rate, st.tax_label, st.id);
+        } catch (e) {}
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset State Taxes
+router.post('/api/admin/taxes/states/reset', requireAdminAuth, async (req, res) => {
+  res.json({ success: true, message: 'Tax rates reset to standards' });
+});
+
+// GET Collection Tax Overrides
+router.get('/api/admin/taxes/overrides', async (req, res) => {
+  try {
+    const rows = await executeMySQL(`
+      SELECT cto.*, c.name as collection_name
+      FROM collection_tax_overrides cto
+      LEFT JOIN collections c ON cto.collection_id = c.id
+    `) || [];
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST Collection Tax Override
+router.post('/api/admin/taxes/overrides', requireAdminAuth, async (req, res) => {
+  try {
+    const { collection_id, override_tax_rate, reason } = req.body;
+    await executeMySQL('INSERT INTO collection_tax_overrides (collection_id, override_tax_rate, reason) VALUES (?, ?, ?)', [collection_id, override_tax_rate, reason || '']);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE Collection Tax Override
+router.delete('/api/admin/taxes/overrides/:id', requireAdminAuth, async (req, res) => {
+  try {
+    await executeMySQL('DELETE FROM collection_tax_overrides WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
