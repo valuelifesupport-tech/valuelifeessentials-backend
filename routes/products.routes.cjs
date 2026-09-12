@@ -138,18 +138,29 @@ router.get('/api/check-sku', async (req, res) => {
 router.post('/api/products', requireAdminAuth, async (req, res) => {
   try {
     const {
-      name, description, price, compare_price, cost_price,
-      sku, category_id, subcategory_id, stock_quantity = 100,
+      description, sku, category_id, subcategory_id,
       images = [], variants = [], collections = [], is_best_product = 0,
-      tax_rate = 5, hsn_code = ''
+      vendor, product_type, tags, weight, country_of_origin, barcode
     } = req.body;
 
-    if (!name || price === undefined) {
-      return res.status(400).json({ error: 'Name and price are required' });
+    // Accept both naming conventions for backward compatibility
+    const title = req.body.title || req.body.name;
+    const price_inr = req.body.price_inr != null ? Number(req.body.price_inr) : (req.body.price != null ? Number(req.body.price) : undefined);
+    const price_usd = req.body.price_usd != null ? Number(req.body.price_usd) : (price_inr != null ? Math.round(price_inr / 83 * 100) / 100 : undefined);
+    const compare_price_inr = req.body.compare_price_inr != null ? Number(req.body.compare_price_inr) : (req.body.compare_price != null ? Number(req.body.compare_price) : null);
+    const compare_price_usd = req.body.compare_price_usd != null ? Number(req.body.compare_price_usd) : (compare_price_inr ? Math.round(compare_price_inr / 83 * 100) / 100 : null);
+    const cost_per_item_inr = req.body.cost_per_item_inr != null ? Number(req.body.cost_per_item_inr) : (req.body.cost_price != null ? Number(req.body.cost_price) : null);
+    const cost_per_item_usd = req.body.cost_per_item_usd != null ? Number(req.body.cost_per_item_usd) : (cost_per_item_inr ? Math.round(cost_per_item_inr / 83 * 100) / 100 : null);
+    const stock = req.body.stock != null ? Number(req.body.stock) : (req.body.stock_quantity != null ? Number(req.body.stock_quantity) : 100);
+    const gst_percent = req.body.gst_percent != null ? Number(req.body.gst_percent) : (req.body.tax_rate != null ? Number(req.body.tax_rate) : 5);
+    const hs_code = req.body.hs_code || req.body.hsn_code || '';
+
+    if (!title || price_inr === undefined) {
+      return res.status(400).json({ error: 'Title/name and price are required' });
     }
 
     let productSku = sku ? String(sku).trim().toUpperCase() : await generateUniqueSku('VL');
-    let slug = req.body.slug ? generateSlug(req.body.slug) : generateSlug(name);
+    let slug = req.body.slug ? generateSlug(req.body.slug) : generateSlug(title);
     let finalSlug = slug;
     let counter = 1;
 
@@ -161,17 +172,21 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
 
     const primaryImage = images.length > 0 ? images[0] : (req.body.image_url || null);
 
-    // Insert Product into MySQL
+    // Insert Product into MySQL (using correct column names)
     const myRes = await executeMySQL(
       `INSERT INTO products (
-        name, slug, description, price, compare_price, cost_price,
-        sku, category_id, subcategory_id, stock_quantity, image_url,
-        is_best_product, tax_rate, hsn_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        title, slug, description, price_inr, price_usd,
+        compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
+        sku, category_id, subcategory_id, stock, image_url,
+        is_best_product, gst_percent, hs_code,
+        vendor, product_type, tags, weight, country_of_origin, barcode, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
       [
-        name, finalSlug, description || '', Number(price), compare_price ? Number(compare_price) : null, cost_price ? Number(cost_price) : null,
-        productSku, category_id || null, subcategory_id || null, Number(stock_quantity), primaryImage,
-        is_best_product ? 1 : 0, Number(tax_rate) || 5, hsn_code || ''
+        title, finalSlug, description || '', price_inr, price_usd,
+        compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
+        productSku, category_id || null, subcategory_id || null, stock, primaryImage,
+        is_best_product ? 1 : 0, gst_percent, hs_code,
+        vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null
       ]
     );
     const newId = myRes ? myRes.insertId : Date.now();
@@ -179,13 +194,17 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
     // Insert into SQLite
     try {
       db.prepare(`INSERT OR REPLACE INTO products (
-        id, name, slug, description, price, compare_price, cost_price,
-        sku, category_id, subcategory_id, stock_quantity, image_url,
-        is_best_product, tax_rate, hsn_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        newId, name, finalSlug, description || '', Number(price), compare_price ? Number(compare_price) : null, cost_price ? Number(cost_price) : null,
-        productSku, category_id || null, subcategory_id || null, Number(stock_quantity), primaryImage,
-        is_best_product ? 1 : 0, Number(tax_rate) || 5, hsn_code || ''
+        id, title, slug, description, price_inr, price_usd,
+        compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
+        sku, category_id, subcategory_id, stock, image_url,
+        is_best_product, hs_code,
+        vendor, product_type, tags, weight, country_of_origin, barcode, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`).run(
+        newId, title, finalSlug, description || '', price_inr, price_usd,
+        compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
+        productSku, category_id || null, subcategory_id || null, stock, primaryImage,
+        is_best_product ? 1 : 0, hs_code,
+        vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null
       );
     } catch (e) {}
 
@@ -203,9 +222,11 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
     if (Array.isArray(variants)) {
       for (const v of variants) {
         const vSku = v.sku ? String(v.sku).trim().toUpperCase() : await generateUniqueSku(productSku);
+        const vPriceInr = Number(v.price_inr || v.price || price_inr);
+        const vPriceUsd = Number(v.price_usd || (Math.round(vPriceInr / 83 * 100) / 100));
         await executeMySQL(
-          'INSERT INTO product_variants (product_id, name, variant_name, price, compare_price, sku, stock_quantity) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [newId, v.name || v.variant_name || '', v.variant_name || v.name || '', Number(v.price || price), v.compare_price ? Number(v.compare_price) : null, vSku, Number(v.stock_quantity || 100)]
+          'INSERT INTO product_variants (product_id, title, variant_name, price_inr, price_usd, sku, stock) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [newId, v.title || v.name || v.variant_name || '', v.variant_name || v.name || v.title || '', vPriceInr, vPriceUsd, vSku, Number(v.stock || v.stock_quantity || 100)]
         );
       }
     }
@@ -213,11 +234,11 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
     // Collections
     if (Array.isArray(collections)) {
       for (const colId of collections) {
-        await executeMySQL('INSERT INTO product_collections (product_id, collection_id) VALUES (?, ?)', [newId, colId]);
+        await executeMySQL('INSERT IGNORE INTO product_collections (product_id, collection_id) VALUES (?, ?)', [newId, colId]);
       }
     }
 
-    res.json({ id: newId, name, slug: finalSlug, sku: productSku, price });
+    res.json({ id: newId, title, name: title, slug: finalSlug, sku: productSku, price_inr, price: price_inr });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -228,25 +249,53 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const {
-      name, description, price, compare_price, cost_price,
-      sku, category_id, subcategory_id, stock_quantity,
-      images, variants, collections, is_best_product, tax_rate, hsn_code
+      description, sku, category_id, subcategory_id,
+      images, variants, collections, is_best_product,
+      vendor, product_type, tags, weight, country_of_origin, barcode
     } = req.body;
+
+    // Accept both naming conventions
+    const title = req.body.title || req.body.name || undefined;
+    const price_inr = req.body.price_inr != null ? Number(req.body.price_inr) : (req.body.price != null ? Number(req.body.price) : undefined);
+    const price_usd = req.body.price_usd != null ? Number(req.body.price_usd) : (price_inr != null ? Math.round(price_inr / 83 * 100) / 100 : undefined);
+    const compare_price_inr = req.body.compare_price_inr != null ? Number(req.body.compare_price_inr) : (req.body.compare_price != null ? Number(req.body.compare_price) : undefined);
+    const compare_price_usd = req.body.compare_price_usd != null ? Number(req.body.compare_price_usd) : (compare_price_inr != null ? Math.round(compare_price_inr / 83 * 100) / 100 : undefined);
+    const cost_per_item_inr = req.body.cost_per_item_inr != null ? Number(req.body.cost_per_item_inr) : (req.body.cost_price != null ? Number(req.body.cost_price) : undefined);
+    const cost_per_item_usd = req.body.cost_per_item_usd != null ? Number(req.body.cost_per_item_usd) : (cost_per_item_inr != null ? Math.round(cost_per_item_inr / 83 * 100) / 100 : undefined);
+    const stock = req.body.stock != null ? Number(req.body.stock) : (req.body.stock_quantity != null ? Number(req.body.stock_quantity) : undefined);
+    const gst_percent = req.body.gst_percent != null ? Number(req.body.gst_percent) : (req.body.tax_rate != null ? Number(req.body.tax_rate) : undefined);
+    const hs_code = req.body.hs_code || req.body.hsn_code || undefined;
 
     const primaryImage = (images && images.length > 0) ? images[0] : (req.body.image_url || undefined);
 
+    // Build slug if title changed
+    let slug = undefined;
+    if (title) {
+      slug = req.body.slug ? generateSlug(req.body.slug) : generateSlug(title);
+    }
+
     await executeMySQL(
       `UPDATE products SET
-        name = COALESCE(?, name), description = COALESCE(?, description), price = COALESCE(?, price),
-        compare_price = COALESCE(?, compare_price), cost_price = COALESCE(?, cost_price), sku = COALESCE(?, sku),
-        category_id = COALESCE(?, category_id), subcategory_id = COALESCE(?, subcategory_id), stock_quantity = COALESCE(?, stock_quantity),
-        image_url = COALESCE(?, image_url), is_best_product = COALESCE(?, is_best_product), tax_rate = COALESCE(?, tax_rate),
-        hsn_code = COALESCE(?, hsn_code)
+        title = COALESCE(?, title), slug = COALESCE(?, slug), description = COALESCE(?, description),
+        price_inr = COALESCE(?, price_inr), price_usd = COALESCE(?, price_usd),
+        compare_price_inr = COALESCE(?, compare_price_inr), compare_price_usd = COALESCE(?, compare_price_usd),
+        cost_per_item_inr = COALESCE(?, cost_per_item_inr), cost_per_item_usd = COALESCE(?, cost_per_item_usd),
+        sku = COALESCE(?, sku), category_id = COALESCE(?, category_id), subcategory_id = COALESCE(?, subcategory_id),
+        stock = COALESCE(?, stock), image_url = COALESCE(?, image_url),
+        is_best_product = COALESCE(?, is_best_product), gst_percent = COALESCE(?, gst_percent), hs_code = COALESCE(?, hs_code),
+        vendor = COALESCE(?, vendor), product_type = COALESCE(?, product_type), tags = COALESCE(?, tags),
+        weight = COALESCE(?, weight), country_of_origin = COALESCE(?, country_of_origin)
       WHERE id = ?`,
       [
-        name, description, price ? Number(price) : null, compare_price ? Number(compare_price) : null, cost_price ? Number(cost_price) : null,
-        sku, category_id, subcategory_id, stock_quantity ? Number(stock_quantity) : null, primaryImage,
-        is_best_product !== undefined ? (is_best_product ? 1 : 0) : null, tax_rate, hsn_code, id
+        title, slug, description,
+        price_inr, price_usd,
+        compare_price_inr, compare_price_usd,
+        cost_per_item_inr, cost_per_item_usd,
+        sku, category_id, subcategory_id,
+        stock, primaryImage,
+        is_best_product !== undefined ? (is_best_product ? 1 : 0) : null, gst_percent, hs_code,
+        vendor, product_type, tags,
+        weight ? Number(weight) : null, country_of_origin, id
       ]
     );
 
@@ -263,10 +312,20 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
       await executeMySQL('DELETE FROM product_variants WHERE product_id = ?', [id]);
       for (const v of variants) {
         const vSku = v.sku ? String(v.sku).trim().toUpperCase() : await generateUniqueSku('VL');
+        const vPriceInr = Number(v.price_inr || v.price || price_inr || 0);
+        const vPriceUsd = Number(v.price_usd || (Math.round(vPriceInr / 83 * 100) / 100));
         await executeMySQL(
-          'INSERT INTO product_variants (product_id, name, variant_name, price, compare_price, sku, stock_quantity) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [id, v.name || v.variant_name || '', v.variant_name || v.name || '', Number(v.price || price), v.compare_price ? Number(v.compare_price) : null, vSku, Number(v.stock_quantity || 100)]
+          'INSERT INTO product_variants (product_id, title, variant_name, price_inr, price_usd, sku, stock) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [id, v.title || v.name || v.variant_name || '', v.variant_name || v.name || v.title || '', vPriceInr, vPriceUsd, vSku, Number(v.stock || v.stock_quantity || 100)]
         );
+      }
+    }
+
+    // Sync Collections if provided
+    if (Array.isArray(collections)) {
+      await executeMySQL('DELETE FROM product_collections WHERE product_id = ?', [id]);
+      for (const colId of collections) {
+        await executeMySQL('INSERT IGNORE INTO product_collections (product_id, collection_id) VALUES (?, ?)', [id, colId]);
       }
     }
 
