@@ -52,6 +52,7 @@ app.use(require('./routes/filters.routes.cjs'));
 app.use(require('./routes/cartWishlist.routes.cjs'));
 app.use(require('./routes/settings.routes.cjs'));
 app.use(require('./routes/pages.routes.cjs'));
+app.use(require('./routes/blogs.routes.cjs'));
 app.use(require('./routes/reviews.routes.cjs'));
 app.use(require('./routes/coupons.routes.cjs'));
 app.use(require('./routes/analytics.routes.cjs'));

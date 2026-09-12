@@ -432,6 +432,7 @@ async function setupHostingerMySQL() {
         show_bestsellers INT DEFAULT 1,
         show_brand_story INT DEFAULT 1,
         show_testimonials INT DEFAULT 1,
+        show_blog_section INT DEFAULT 1,
         show_instagram_feed INT DEFAULT 1,
         show_newsletter INT DEFAULT 1,
         show_footer INT DEFAULT 1,
@@ -475,6 +476,29 @@ async function setupHostingerMySQL() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS blog_posts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) NOT NULL UNIQUE,
+        category VARCHAR(100) DEFAULT 'General Wellness',
+        excerpt TEXT,
+        content LONGTEXT NOT NULL,
+        featured_image VARCHAR(500),
+        author_name VARCHAR(150) DEFAULT 'ValueLife Editorial',
+        author_avatar VARCHAR(500) DEFAULT '',
+        author_role VARCHAR(150) DEFAULT 'Ayurvedic Specialist',
+        read_time VARCHAR(50) DEFAULT '5 min read',
+        tags VARCHAR(255) DEFAULT 'Organic, Wellness, Ayurveda',
+        views_count INT DEFAULT 0,
+        is_published TINYINT(1) DEFAULT 1,
+        is_featured TINYINT(1) DEFAULT 0,
+        sort_order INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
     console.log('Seeding initial records into Hostinger MySQL tables if empty...');
