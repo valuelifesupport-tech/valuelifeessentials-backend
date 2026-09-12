@@ -250,4 +250,109 @@ router.delete('/api/admin/taxes/overrides/:id', requireAdminAuth, async (req, re
   }
 });
 
+// ==========================================
+// EDITORIAL PROMO BANNER CONFIG ENDPOINTS
+// ==========================================
+
+// GET Editorial Promo Config
+router.get(['/api/editorial-promo', '/api/admin/editorial-promo'], async (req, res) => {
+  try {
+    let row = await executeMySQL('SELECT * FROM editorial_promo_config WHERE id = 1');
+    if (row && row.length > 0) return res.json(row[0]);
+    try {
+      const sqliteRow = db.prepare('SELECT * FROM editorial_promo_config WHERE id = 1').get();
+      if (sqliteRow) return res.json(sqliteRow);
+    } catch (e) {}
+
+    res.json({
+      id: 1,
+      badge_text: 'LIMITED TIME OFFER',
+      title_part1: 'Pure Products',
+      title_part2: 'Happier Lives',
+      subtitle: 'Flat 20% Off on Natural Essentials & Certified Organics',
+      cta_text: 'Shop the Collection',
+      cta_link: '/offers',
+      image_url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=800&q=80',
+      script_quote: 'Nature Nurtures You',
+      quote_subtext: '🌿 Handcrafted with Care',
+      is_enabled: 1
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Editorial Promo Config
+router.put(['/api/editorial-promo', '/api/admin/editorial-promo'], requireAdminAuth, async (req, res) => {
+  try {
+    const fields = req.body;
+    const keys = Object.keys(fields).filter(k => k !== 'id' && k !== 'updated_at');
+    if (keys.length === 0) return res.json({ success: true });
+
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    const vals = keys.map(k => fields[k]);
+    await executeMySQL(`UPDATE editorial_promo_config SET ${setSql} WHERE id = 1`, vals);
+
+    try {
+      db.prepare(`UPDATE editorial_promo_config SET ${setSql} WHERE id = 1`).run(...vals);
+    } catch (e) {}
+
+    res.json({ success: true, message: 'Editorial promo updated' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// BRAND STORY SECTION CONFIG ENDPOINTS
+// ==========================================
+
+// GET Brand Story Config
+router.get(['/api/brand-story', '/api/admin/brand-story'], async (req, res) => {
+  try {
+    let row = await executeMySQL('SELECT * FROM brand_story_config WHERE id = 1');
+    if (row && row.length > 0) return res.json(row[0]);
+    try {
+      const sqliteRow = db.prepare('SELECT * FROM brand_story_config WHERE id = 1').get();
+      if (sqliteRow) return res.json(sqliteRow);
+    } catch (e) {}
+
+    res.json({
+      id: 1,
+      badge_text: 'WHO WE ARE',
+      heading: 'Our Story',
+      overlay_title: 'A Healthier',
+      overlay_subtitle: 'Tomorrow Together',
+      description: 'At ValueLife, we believe in the power of nature to create a healthier, happier world. Our mission is to bring you high-quality, natural and sustainable products for a better everyday life.',
+      cta_text: 'Learn More',
+      cta_link: '/pages/about-us',
+      image_url: 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1000&q=80',
+      is_enabled: 1
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Brand Story Config
+router.put(['/api/brand-story', '/api/admin/brand-story'], requireAdminAuth, async (req, res) => {
+  try {
+    const fields = req.body;
+    const keys = Object.keys(fields).filter(k => k !== 'id' && k !== 'updated_at');
+    if (keys.length === 0) return res.json({ success: true });
+
+    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    const vals = keys.map(k => fields[k]);
+    await executeMySQL(`UPDATE brand_story_config SET ${setSql} WHERE id = 1`, vals);
+
+    try {
+      db.prepare(`UPDATE brand_story_config SET ${setSql} WHERE id = 1`).run(...vals);
+    } catch (e) {}
+
+    res.json({ success: true, message: 'Brand story updated' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

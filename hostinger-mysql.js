@@ -32,15 +32,7 @@ async function setupHostingerMySQL() {
     const connection = await mysql.createConnection(config);
     console.log('✅ Connected successfully to Hostinger MySQL!');
 
-    // Check if tables already exist
-    const [existingTables] = await connection.query("SHOW TABLES LIKE 'categories'");
-    if (existingTables && existingTables.length > 0) {
-      console.log('✅ All tables already exist and verified in Hostinger MySQL! Skipping re-creation & seeding.');
-      await connection.end();
-      return true;
-    }
-
-    console.log('Tables not found. Initializing database tables in Hostinger MySQL...');
+    console.log('Ensuring all schema tables exist in Hostinger MySQL...');
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS store_settings (
@@ -340,6 +332,148 @@ async function setupHostingerMySQL() {
         tax_rate DECIMAL(5,2) NOT NULL,
         state_name VARCHAR(255) DEFAULT 'ALL',
         FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS store_hero_config (
+        id INT PRIMARY KEY DEFAULT 1,
+        hero_enabled INT DEFAULT 1,
+        active_style VARCHAR(50) DEFAULT 'SPLIT',
+        badge_text VARCHAR(255) DEFAULT '100% Certified Organic Superfoods',
+        title VARCHAR(255) DEFAULT 'Pure Farm-Fresh Organic Groceries & Wellness Supplies',
+        subtitle TEXT,
+        primary_btn_text VARCHAR(100) DEFAULT 'Shop Catalog Now',
+        primary_btn_link VARCHAR(255) DEFAULT '/products',
+        secondary_btn_text VARCHAR(100) DEFAULT 'Explore Organic Offers',
+        secondary_btn_link VARCHAR(255) DEFAULT '/offers',
+        image_url TEXT,
+        bg_image_url TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS hero_slides (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title_part1 VARCHAR(255) NOT NULL,
+        title_part2 VARCHAR(255),
+        tagline VARCHAR(255) DEFAULT 'NATURAL • HEALTHY • SUSTAINABLE',
+        description TEXT,
+        cta_text VARCHAR(100) DEFAULT 'Shop Now',
+        cta_link VARCHAR(255) DEFAULT '/products',
+        packaging_img TEXT,
+        jars_img TEXT,
+        script_quote VARCHAR(255) DEFAULT 'Good Products, Brighter Days.',
+        sort_order INT DEFAULT 0,
+        is_active INT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS instagram_posts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        image_url TEXT NOT NULL,
+        post_url VARCHAR(500) DEFAULT 'https://www.instagram.com/valuelife_essentials/?hl=en',
+        sort_order INT DEFAULT 0,
+        is_active INT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS editorial_promo_config (
+        id INT PRIMARY KEY DEFAULT 1,
+        badge_text VARCHAR(255) DEFAULT 'LIMITED TIME OFFER',
+        title_part1 VARCHAR(255) DEFAULT 'Pure Products',
+        title_part2 VARCHAR(255) DEFAULT 'Happier Lives',
+        subtitle TEXT,
+        cta_text VARCHAR(100) DEFAULT 'Shop the Collection',
+        cta_link VARCHAR(255) DEFAULT '/offers',
+        image_url TEXT,
+        script_quote VARCHAR(255) DEFAULT 'Nature Nurtures You',
+        quote_subtext VARCHAR(255) DEFAULT '🌿 Handcrafted with Care',
+        is_enabled INT DEFAULT 1,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS brand_story_config (
+        id INT PRIMARY KEY DEFAULT 1,
+        badge_text VARCHAR(255) DEFAULT 'WHO WE ARE',
+        heading VARCHAR(255) DEFAULT 'Our Story',
+        overlay_title VARCHAR(255) DEFAULT 'A Healthier',
+        overlay_subtitle VARCHAR(255) DEFAULT 'Tomorrow Together',
+        description TEXT,
+        cta_text VARCHAR(100) DEFAULT 'Learn More',
+        cta_link VARCHAR(255) DEFAULT '/pages/about-us',
+        image_url TEXT,
+        is_enabled INT DEFAULT 1,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS store_sections_config (
+        id INT PRIMARY KEY DEFAULT 1,
+        show_announcement INT DEFAULT 1,
+        show_hero INT DEFAULT 1,
+        show_trust_badges INT DEFAULT 1,
+        show_promo_banners INT DEFAULT 1,
+        show_categories_slider INT DEFAULT 1,
+        show_featured_products INT DEFAULT 1,
+        show_editorial_promo INT DEFAULT 1,
+        show_why_choose_us INT DEFAULT 1,
+        show_bestsellers INT DEFAULT 1,
+        show_brand_story INT DEFAULT 1,
+        show_testimonials INT DEFAULT 1,
+        show_instagram_feed INT DEFAULT 1,
+        show_newsletter INT DEFAULT 1,
+        show_footer INT DEFAULT 1,
+        show_sales_ticker INT DEFAULT 1,
+        sales_ticker_json TEXT,
+        trust_badge_1_title VARCHAR(255) DEFAULT '100% Natural',
+        trust_badge_1_sub VARCHAR(255) DEFAULT 'Pure origin',
+        trust_badge_2_title VARCHAR(255) DEFAULT 'Safe for Family',
+        trust_badge_2_sub VARCHAR(255) DEFAULT 'Zero toxics',
+        trust_badge_3_title VARCHAR(255) DEFAULT 'Eco Friendly',
+        trust_badge_3_sub VARCHAR(255) DEFAULT 'Sustainable',
+        trust_badge_4_title VARCHAR(255) DEFAULT 'Trusted Quality',
+        trust_badge_4_sub VARCHAR(255) DEFAULT 'Lab verified',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS store_theme_config (
+        id INT PRIMARY KEY DEFAULT 1,
+        active_preset VARCHAR(50) DEFAULT 'EMERALD',
+        primary_color VARCHAR(50) DEFAULT '#164e3f',
+        primary_hover VARCHAR(50) DEFAULT '#0f382d',
+        secondary_color VARCHAR(50) DEFAULT '#52b788',
+        accent_color VARCHAR(50) DEFAULT '#f59e0b',
+        heading_font VARCHAR(100) DEFAULT 'Outfit',
+        body_font VARCHAR(100) DEFAULT 'Inter',
+        card_style VARCHAR(50) DEFAULT 'ORGANIC_BAZAR',
+        header_style VARCHAR(50) DEFAULT 'EMERALD_DARK',
+        dark_mode INT DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS review_images (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        review_id INT NOT NULL,
+        image_url TEXT NOT NULL,
+        sort_order INT DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
