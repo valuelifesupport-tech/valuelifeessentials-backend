@@ -501,6 +501,38 @@ async function setupHostingerMySQL() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    console.log('Ensuring all schema columns and tables exist in Hostinger MySQL...');
+
+    const orderCols = [
+      'ADD COLUMN IF NOT EXISTS state_name VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS subtotal DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS discount_amount DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS tax_amount DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS shipping_amount DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS payable_amount DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS cod_balance_amount DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS is_partial_payment TINYINT DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)',
+      'ADD COLUMN IF NOT EXISTS remark TEXT',
+      'ADD COLUMN IF NOT EXISTS items_json LONGTEXT'
+    ];
+    for (const c of orderCols) {
+      try { await connection.query('ALTER TABLE orders ' + c); } catch (e) {}
+    }
+
+    const itemCols = [
+      'ADD COLUMN IF NOT EXISTS product_name VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS variant_id INT',
+      'ADD COLUMN IF NOT EXISTS variant_name VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS price DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS total DECIMAL(10,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS variant_title VARCHAR(255)'
+    ];
+    for (const c of itemCols) {
+      try { await connection.query('ALTER TABLE order_items ' + c); } catch (e) {}
+    }
+
     console.log('Seeding initial records into Hostinger MySQL tables if empty...');
 
     await connection.query(`
