@@ -182,8 +182,8 @@ router.get('/api/admin/analytics', requireAdminAuth, async (req, res) => {
       if (o.order_status === 'PENDING' || o.order_status === 'PROCESSING') pendingOrders++;
     });
 
-    const myProds = await executeMySQL('SELECT id, stock_quantity FROM products') || [];
-    let lowStockCount = myProds.filter(p => Number(p.stock_quantity || 0) <= 50).length;
+    const myProds = await executeMySQL('SELECT id, stock FROM products') || [];
+    let lowStockCount = myProds.filter(p => Number(p.stock || 0) <= 50).length;
 
     const myRevs = await executeMySQL('SELECT id FROM product_reviews') || [];
     const totalVisitorsCount = Math.max(145, (myOrders.length * 8) + 24);
