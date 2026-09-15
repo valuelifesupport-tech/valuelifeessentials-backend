@@ -224,13 +224,28 @@ router.post('/api/orders', async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
+    const isIntraState = !state_name || state_name.trim().toLowerCase() === 'maharashtra';
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+
+    if (isIntraState) {
+      cgstAmount = Math.round((taxAmount / 2) * 100) / 100;
+      sgstAmount = Math.round((taxAmount - cgstAmount) * 100) / 100;
+      igstAmount = 0;
+    } else {
+      cgstAmount = 0;
+      sgstAmount = 0;
+      igstAmount = taxAmount;
+    }
+
     const insertParams = [
       orderNumber, rawName, rawEmail, rawPhone,
       rawAddress, country, currency, totalAmount, paidAmount,
       remainingAmount, effectivePaymentMode,
       (paidAmount >= totalAmount ? 'PAID' : (paidAmount > 0 ? 'PARTIAL_PAID' : 'PENDING')),
       'PROCESSING',
-      effectiveNotes, taxAmount, 0, 0, taxAmount,
+      effectiveNotes, taxAmount, cgstAmount, sgstAmount, igstAmount,
       '', '', '',
       finalUserId, payment_gateway, gateway_order_id || null, gateway_payment_id || null,
       state_name, subtotal, discount, coupon_code || null, taxAmount,
