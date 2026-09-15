@@ -36,11 +36,13 @@ class BaseGateway {
   }
 }
 
+const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require('./config/constants.cjs');
+
 // 1. RAZORPAY GATEWAY ADAPTER (Supports Live Keys + High-Fidelity Dummy/Test Mode)
 class RazorpayGateway extends BaseGateway {
   constructor() {
-    const keyId = process.env.RAZORPAY_KEY_ID || '';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || '';
+    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID || 'rzp_test_TcG0EYPMH8tl5L';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET || 'qb5aHmgV3fGISbQxgQS0xxqC';
     const hasLiveKeys = Boolean(keyId && keySecret && keyId.startsWith('rzp_'));
 
     super({
@@ -48,14 +50,14 @@ class RazorpayGateway extends BaseGateway {
       name: 'Razorpay',
       description: 'UPI (Google Pay, PhonePe, Paytm), Credit/Debit Cards, Net Banking & Wallets',
       enabled: true,
-      isTestMode: !hasLiveKeys || keyId.startsWith('rzp_test_'),
+      isTestMode: keyId.startsWith('rzp_test_'),
       supportedCurrencies: ['INR', 'USD'],
       supportedMethods: ['UPI', 'CARD', 'NETBANKING', 'WALLET'],
       icon: 'razorpay'
     });
 
-    this.keyId = keyId || 'rzp_test_valuelife_dummy';
-    this.keySecret = keySecret || 'valuelife_sec_dummy_2026';
+    this.keyId = keyId;
+    this.keySecret = keySecret;
     this.hasLiveKeys = hasLiveKeys;
   }
 
@@ -99,6 +101,8 @@ class RazorpayGateway extends BaseGateway {
             receipt: data.receipt,
             status: data.status
           };
+        } else {
+          console.warn('Razorpay API non-200 response:', data);
         }
       } catch (e) {
         console.warn('Razorpay live API call failed, falling back to secure dummy simulator:', e.message);

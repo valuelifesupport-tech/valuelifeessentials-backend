@@ -3,6 +3,7 @@ const router = express.Router();
 const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
+const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 
 // Helper to attach items to an array of orders or single order
 async function enrichOrdersWithItems(orders) {
@@ -84,85 +85,35 @@ router.post('/api/orders', async (req, res) => {
     const effectivePaymentMode = (payment_mode || payment_method || 'COD').toUpperCase();
     const effectiveNotes = (order_notes || remark || '').trim();
 
-    // Process items & calculate pricing
-    let subtotal = 0;
-    const orderItems = [];
-
-    for (const it of items) {
-      const pId = it.product_id || it.id;
-      let title = it.product_title || it.product_name || it.name || it.title || 'Product';
-      let img = it.image_url || it.image || it.primary_image || it.item_image || '';
-      let pPrice = Number(it.price || it.price_inr || 0);
-      const pQty = Number(it.quantity || 1);
-
-      let vId = it.variant_id || it.variantId || null;
-      let vName = it.variant_name || it.variant_title || null;
-
-      // Find variant_id if variant name given but id missing
-      if (!vId && vName && pId) {
-        try {
-          const vRows = await executeMySQL(
-            'SELECT id, price_inr, stock FROM product_variants WHERE product_id = ? AND (variant_name = ? OR title = ?) LIMIT 1',
-            [pId, vName, vName]
-          );
-          if (vRows && vRows.length > 0) {
-            vId = vRows[0].id;
-          }
-        } catch (e) {}
-      }
-
-      // Fetch product info from MySQL if missing
-      if (pId && (!title || title === 'Product' || !img || !pPrice)) {
-        try {
-          const prods = await executeMySQL('SELECT title, price_inr, image_url, thumbnail FROM products WHERE id = ?', [pId]);
-          if (prods && prods.length > 0) {
-            if (!title || title === 'Product') title = prods[0].title;
-            if (!img) img = prods[0].image_url || prods[0].thumbnail || '';
-            if (!pPrice) pPrice = Number(prods[0].price_inr || 0);
-          }
-        } catch (e) {}
-      }
-
-      const lineTotal = pPrice * pQty;
-      subtotal += lineTotal;
-
-      orderItems.push({
-        product_id: pId || null,
-        variant_id: vId || null,
-        product_title: title,
-        product_name: title,
-        variant_name: vName,
-        price: pPrice,
-        price_inr: pPrice,
-        price_usd: Math.round((pPrice / 85) * 100) / 100,
-        quantity: pQty,
-        total: lineTotal,
-        image_url: img
-      });
+    // ZERO-TRUST SERVER-SIDE PRICING & INVENTORY SECURITY
+    // Every item price, variant price, coupon discount, tax rate, and total are strictly verified from MySQL
+    let verifiedPricing;
+    try {
+      verifiedPricing = await verifyAndCalculateOrderPricing(items, coupon_code);
+    } catch (pricingErr) {
+      return res.status(400).json({ error: pricingErr.message });
     }
 
-    const discount = Math.min(Number(coupon_discount || 0), subtotal);
-    const taxableAmount = Math.max(0, subtotal - discount);
+    const {
+      verifiedItems: orderItems,
+      subtotal,
+      discountAmount: discount,
+      couponCode: validatedCouponCode,
+      taxableAmount,
+      taxAmount,
+      shippingAmount,
+      totalAmount
+    } = verifiedPricing;
 
-    // GST & shipping calculation
-    const gstRate = 5;
-    const taxAmount = Math.round((taxableAmount * gstRate) / 100);
-    const shippingAmount = taxableAmount >= 499 ? 0 : 50;
-    const calculatedTotal = taxableAmount + taxAmount + shippingAmount;
-
-    // Final total amount
-    const totalAmount = (clientTotal !== undefined && Number(clientTotal) > 0) ? Number(clientTotal) : calculatedTotal;
-
-    // Deposit & Balance
+    // Deposit & Balance Calculation strictly based on verified total
     const isPartial = is_partial_deposit || effectivePaymentMode === 'PARTIAL' || effectivePaymentMode === 'PARTIAL_COD';
     let payableNow = totalAmount;
     let codBalance = 0;
 
     if (isPartial) {
-      payableNow = (clientPaid !== undefined && Number(clientPaid) > 0)
-        ? Number(clientPaid)
-        : Math.round((totalAmount * Number(partial_deposit_percent)) / 100);
-      codBalance = totalAmount - payableNow;
+      const depPercent = Math.min(100, Math.max(10, Number(partial_deposit_percent) || 20));
+      payableNow = Math.round((totalAmount * depPercent) / 100);
+      codBalance = Math.max(0, totalAmount - payableNow);
     } else if (effectivePaymentMode === 'COD') {
       payableNow = 0;
       codBalance = totalAmount;
