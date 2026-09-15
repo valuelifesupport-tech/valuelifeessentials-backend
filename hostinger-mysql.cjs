@@ -182,7 +182,47 @@ async function setupHostingerMySQL() {
         cancellation_notes TEXT,
         courier_name VARCHAR(100),
         tracking_number VARCHAR(100),
+        transaction_id VARCHAR(100),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        transaction_id VARCHAR(100) UNIQUE NOT NULL,
+        order_id VARCHAR(100) NULL,
+        order_number VARCHAR(100) NULL,
+        user_id INT NULL,
+        customer_name VARCHAR(255) NULL,
+        customer_email VARCHAR(255) NULL,
+        customer_phone VARCHAR(50) NULL,
+        gateway VARCHAR(50) NOT NULL DEFAULT 'razorpay',
+        gateway_order_id VARCHAR(100) NULL,
+        gateway_payment_id VARCHAR(100) NULL,
+        gateway_signature TEXT NULL,
+        currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+        amount DECIMAL(10,2) NOT NULL,
+        amount_paise BIGINT NOT NULL,
+        step VARCHAR(50) NOT NULL DEFAULT '1_PAYMENT_REQ',
+        status VARCHAR(50) NOT NULL DEFAULT 'INITIATED',
+        error_code VARCHAR(100) NULL,
+        error_description TEXT NULL,
+        request_payload LONGTEXT NULL,
+        response_payload LONGTEXT NULL,
+        verification_payload LONGTEXT NULL,
+        ip_address VARCHAR(100) NULL,
+        user_agent TEXT NULL,
+        verified_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_txn_id (transaction_id),
+        INDEX idx_order_id (order_id),
+        INDEX idx_order_num (order_number),
+        INDEX idx_gw_order_id (gateway_order_id),
+        INDEX idx_gw_payment_id (gateway_payment_id),
+        INDEX idx_status (status),
+        INDEX idx_step (step)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 

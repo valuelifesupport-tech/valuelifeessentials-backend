@@ -626,6 +626,37 @@ function initDb() {
       price REAL NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS payment_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      transaction_id TEXT UNIQUE NOT NULL,
+      order_id TEXT,
+      order_number TEXT,
+      user_id INTEGER,
+      customer_name TEXT,
+      customer_email TEXT,
+      customer_phone TEXT,
+      gateway TEXT DEFAULT 'razorpay',
+      gateway_order_id TEXT,
+      gateway_payment_id TEXT,
+      gateway_signature TEXT,
+      currency TEXT DEFAULT 'INR',
+      amount REAL NOT NULL,
+      amount_paise INTEGER NOT NULL,
+      step TEXT DEFAULT '1_PAYMENT_REQ',
+      status TEXT DEFAULT 'INITIATED',
+      error_code TEXT,
+      error_description TEXT,
+      request_payload TEXT,
+      response_payload TEXT,
+      verification_payload TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      verified_at TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+
     CREATE TABLE IF NOT EXISTS banners (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT,
