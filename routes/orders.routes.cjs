@@ -95,13 +95,29 @@ router.post('/api/orders', async (req, res) => {
       let pPrice = Number(it.price || it.price_inr || 0);
       const pQty = Number(it.quantity || 1);
 
+      let vId = it.variant_id || it.variantId || null;
+      let vName = it.variant_name || it.variant_title || null;
+
+      // Find variant_id if variant name given but id missing
+      if (!vId && vName && pId) {
+        try {
+          const vRows = await executeMySQL(
+            'SELECT id, price_inr, stock FROM product_variants WHERE product_id = ? AND (variant_name = ? OR title = ?) LIMIT 1',
+            [pId, vName, vName]
+          );
+          if (vRows && vRows.length > 0) {
+            vId = vRows[0].id;
+          }
+        } catch (e) {}
+      }
+
       // Fetch product info from MySQL if missing
       if (pId && (!title || title === 'Product' || !img || !pPrice)) {
         try {
-          const prods = await executeMySQL('SELECT title, price_inr, primary_image FROM products WHERE id = ?', [pId]);
+          const prods = await executeMySQL('SELECT title, price_inr, image_url, thumbnail FROM products WHERE id = ?', [pId]);
           if (prods && prods.length > 0) {
             if (!title || title === 'Product') title = prods[0].title;
-            if (!img) img = prods[0].primary_image || '';
+            if (!img) img = prods[0].image_url || prods[0].thumbnail || '';
             if (!pPrice) pPrice = Number(prods[0].price_inr || 0);
           }
         } catch (e) {}
@@ -112,10 +128,10 @@ router.post('/api/orders', async (req, res) => {
 
       orderItems.push({
         product_id: pId || null,
-        variant_id: it.variant_id || null,
+        variant_id: vId || null,
         product_title: title,
         product_name: title,
-        variant_name: it.variant_name || it.variant_title || null,
+        variant_name: vName,
         price: pPrice,
         price_inr: pPrice,
         price_usd: Math.round((pPrice / 85) * 100) / 100,
@@ -302,12 +318,19 @@ router.post('/api/orders', async (req, res) => {
         `).run(newOrderId, item.product_id, item.product_name, item.variant_id, item.variant_name, item.price, item.quantity, item.total);
       } catch (e) {}
 
-      // Stock decrement
-      if (item.product_id) {
-        await executeMySQL('UPDATE products SET stock = GREATEST(0, stock - 1) WHERE id = ?', [item.product_id]);
-      }
+      // Stock decrement by purchased quantity
+      const buyQty = Math.max(1, Number(item.quantity) || 1);
       if (item.variant_id) {
-        await executeMySQL('UPDATE product_variants SET stock = GREATEST(0, stock - 1) WHERE id = ?', [item.variant_id]);
+        await executeMySQL('UPDATE product_variants SET stock = GREATEST(0, stock - ?) WHERE id = ?', [buyQty, item.variant_id]);
+        try {
+          db.prepare('UPDATE product_variants SET stock = MAX(0, stock - ?) WHERE id = ?').run(buyQty, item.variant_id);
+        } catch (e) {}
+      }
+      if (item.product_id) {
+        await executeMySQL('UPDATE products SET stock = GREATEST(0, stock - ?) WHERE id = ?', [buyQty, item.product_id]);
+        try {
+          db.prepare('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?').run(buyQty, item.product_id);
+        } catch (e) {}
       }
     }
 
@@ -471,6 +494,30 @@ router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], async (req, re
   try {
     const id = req.params.id;
     const { reason, notes } = req.body || {};
+    // Restore stock for cancelled order items if not already cancelled
+    try {
+      let ordRows = await executeMySQL('SELECT id, order_status FROM orders WHERE id = ? OR order_number = ?', [id, id]);
+      if (ordRows && ordRows.length > 0 && ordRows[0].order_status !== 'CANCELLED') {
+        const orderPk = ordRows[0].id;
+        const oItems = await executeMySQL('SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?', [orderPk]);
+        if (Array.isArray(oItems)) {
+          for (const it of oItems) {
+            const qty = Math.max(1, Number(it.quantity) || 1);
+            if (it.variant_id) {
+              await executeMySQL('UPDATE product_variants SET stock = stock + ? WHERE id = ?', [qty, it.variant_id]);
+              try { db.prepare('UPDATE product_variants SET stock = stock + ? WHERE id = ?').run(qty, it.variant_id); } catch (e) {}
+            }
+            if (it.product_id) {
+              await executeMySQL('UPDATE products SET stock = stock + ? WHERE id = ?', [qty, it.product_id]);
+              try { db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(qty, it.product_id); } catch (e) {}
+            }
+          }
+        }
+      }
+    } catch (restErr) {
+      console.warn('Stock restoration notice on cancel:', restErr.message);
+    }
+
     await executeMySQL(
       'UPDATE orders SET order_status = "CANCELLED", cancellation_reason = COALESCE(?, cancellation_reason), cancellation_notes = COALESCE(?, cancellation_notes) WHERE id = ? OR order_number = ?',
       [reason || 'Cancelled by customer', notes || '', id, id]
@@ -479,7 +526,7 @@ router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], async (req, re
       db.prepare('UPDATE orders SET order_status = "CANCELLED", cancellation_reason = COALESCE(?, cancellation_reason), cancellation_notes = COALESCE(?, cancellation_notes) WHERE id = ? OR order_number = ?')
         .run(reason || 'Cancelled by customer', notes || '', id, id);
     } catch (e) {}
-    res.json({ success: true, message: 'Order cancelled successfully' });
+    res.json({ success: true, message: 'Order cancelled and stock restored successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

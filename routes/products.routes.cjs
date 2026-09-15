@@ -335,12 +335,123 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
   }
 });
 
-// PUT Stock Update
-router.put('/api/products/:id/stock', async (req, res) => {
+// PUT / PATCH Product Stock Update
+router.all(['/api/products/:id/stock'], async (req, res) => {
+  if (req.method !== 'PUT' && req.method !== 'PATCH') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
   try {
-    const { stock_quantity } = req.body;
-    await executeMySQL('UPDATE products SET stock_quantity = ? WHERE id = ?', [Number(stock_quantity), req.params.id]);
-    res.json({ success: true });
+    const rawStock = req.body.stock !== undefined ? req.body.stock : req.body.stock_quantity;
+    const newStock = Math.max(0, Number(rawStock) || 0);
+    const productId = req.params.id;
+
+    await executeMySQL('UPDATE products SET stock = ? WHERE id = ?', [newStock, productId]);
+    try {
+      db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, productId);
+    } catch (e) {}
+
+    res.json({ success: true, product_id: productId, stock: newStock, message: 'Product stock updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT / PATCH Variant Stock Update (Handles both /api/variants/:id/stock and /api/products/variants/:id/stock)
+router.all(['/api/variants/:id/stock', '/api/products/variants/:id/stock'], async (req, res) => {
+  if (req.method !== 'PUT' && req.method !== 'PATCH') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+  try {
+    const rawStock = req.body.stock !== undefined ? req.body.stock : req.body.stock_quantity;
+    const newStock = Math.max(0, Number(rawStock) || 0);
+    const variantId = req.params.id;
+
+    await executeMySQL('UPDATE product_variants SET stock = ? WHERE id = ?', [newStock, variantId]);
+    try {
+      db.prepare('UPDATE product_variants SET stock = ? WHERE id = ?').run(newStock, variantId);
+    } catch (e) {}
+
+    res.json({ success: true, variant_id: variantId, stock: newStock, message: 'Variant stock updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST Create Variant for Product
+router.post(['/api/products/:id/variants', '/api/variants'], async (req, res) => {
+  try {
+    const productId = req.params.id || req.body.product_id;
+    if (!productId) return res.status(400).json({ error: 'Product ID is required' });
+
+    const {
+      variant_name,
+      title,
+      sku,
+      price_inr,
+      price_usd,
+      discount_inr,
+      discount_usd,
+      stock,
+      image_url,
+      compare_price_inr,
+      compare_price_usd
+    } = req.body;
+
+    const vName = variant_name || title || 'Standard';
+    const vSku = sku ? String(sku).trim().toUpperCase() : await generateUniqueSku('VL-VAR');
+    const vPriceInr = Number(price_inr || discount_inr || 149);
+    const vPriceUsd = Number(price_usd || (Math.round(vPriceInr / 83 * 100) / 100));
+    const vStock = Math.max(0, Number(stock !== undefined ? stock : 50));
+    const vImg = image_url || null;
+
+    const myRes = await executeMySQL(
+      `INSERT INTO product_variants (
+        product_id, title, variant_name, sku, price_inr, price_usd,
+        discount_inr, discount_usd, stock, image_url, compare_price_inr, compare_price_usd
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        productId, vName, vName, vSku, vPriceInr, vPriceUsd,
+        discount_inr ? Number(discount_inr) : null, discount_usd ? Number(discount_usd) : null,
+        vStock, vImg, compare_price_inr ? Number(compare_price_inr) : null, compare_price_usd ? Number(compare_price_usd) : null
+      ]
+    );
+
+    const newVariantId = myRes ? myRes.insertId : Date.now();
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO product_variants (
+          id, product_id, title, variant_name, sku, price_inr, price_usd, stock
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(newVariantId, productId, vName, vName, vSku, vPriceInr, vPriceUsd, vStock);
+    } catch (e) {}
+
+    res.json({
+      success: true,
+      variant: {
+        id: newVariantId,
+        product_id: productId,
+        variant_name: vName,
+        sku: vSku,
+        price_inr: vPriceInr,
+        price_usd: vPriceUsd,
+        stock: vStock,
+        image_url: vImg
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE Variant
+router.delete(['/api/variants/:id', '/api/products/variants/:id'], async (req, res) => {
+  try {
+    const variantId = req.params.id;
+    await executeMySQL('DELETE FROM product_variants WHERE id = ?', [variantId]);
+    try {
+      db.prepare('DELETE FROM product_variants WHERE id = ?').run(variantId);
+    } catch (e) {}
+    res.json({ success: true, message: 'Variant deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
