@@ -374,13 +374,27 @@ router.post('/api/auth/login', rateLimiter(20, 60000), async (req, res) => {
       });
     }
 
+    let userAddress = user.address || '';
+    if (!userAddress) {
+      try {
+        const prevOrder = await executeMySQL(
+          'SELECT shipping_address FROM orders WHERE (user_id = ? OR LOWER(customer_email) = ? OR customer_phone = ?) AND shipping_address IS NOT NULL AND shipping_address != "" ORDER BY id DESC LIMIT 1',
+          [user.id, (user.email || '').toLowerCase(), user.phone || '']
+        );
+        if (prevOrder && prevOrder.length > 0 && prevOrder[0].shipping_address) {
+          userAddress = prevOrder[0].shipping_address;
+          await executeMySQL('UPDATE users SET address = ? WHERE id = ?', [userAddress, user.id]);
+        }
+      } catch (e) {}
+    }
+
     const customerUser = {
       id: user.id,
       name: user.name,
       email: user.email,
       phone: user.phone,
       role: user.role || 'CUSTOMER',
-      address: user.address || '',
+      address: userAddress,
       is_verified: 1
     };
 
@@ -406,7 +420,20 @@ router.get('/api/users/:email/profile', async (req, res) => {
     }
 
     if (!users || !users[0]) return res.status(404).json({ error: 'User not found' });
-    res.json(users[0]);
+    const u = users[0];
+    if (!u.address) {
+      try {
+        const prevOrder = await executeMySQL(
+          'SELECT shipping_address FROM orders WHERE (user_id = ? OR LOWER(customer_email) = ? OR customer_phone = ?) AND shipping_address IS NOT NULL AND shipping_address != "" ORDER BY id DESC LIMIT 1',
+          [u.id, (u.email || '').toLowerCase(), u.phone || '']
+        );
+        if (prevOrder && prevOrder.length > 0 && prevOrder[0].shipping_address) {
+          u.address = prevOrder[0].shipping_address;
+          await executeMySQL('UPDATE users SET address = ? WHERE id = ?', [u.address, u.id]);
+        }
+      } catch (e) {}
+    }
+    res.json(u);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

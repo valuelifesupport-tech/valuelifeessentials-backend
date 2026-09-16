@@ -223,6 +223,16 @@ router.post('/api/orders', async (req, res) => {
     const myRes = await executeMySQL(insertSQL, insertParams);
     const newOrderId = (myRes && myRes.insertId) ? myRes.insertId : Date.now();
 
+    // Persist shipping address and contact to user record if registered
+    if ((finalUserId || rawEmail) && rawAddress) {
+      try {
+        await executeMySQL(
+          'UPDATE users SET address = ?, name = COALESCE(NULLIF(name, ""), ?), phone = COALESCE(NULLIF(phone, ""), ?) WHERE id = ? OR LOWER(email) = ?',
+          [rawAddress, rawName || '', rawPhone || '', finalUserId || 0, (rawEmail || '').toLowerCase()]
+        );
+      } catch (e) {}
+    }
+
     // Insert Order into SQLite fallback
     try {
       db.prepare(`
