@@ -78,6 +78,11 @@ async function setupHostingerMySQL() {
     try { await connection.query(`ALTER TABLE users ADD COLUMN is_verified INT DEFAULT 0`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN email_otp VARCHAR(50)`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN email_otp_expires VARCHAR(50)`); } catch(e){}
+    try { await connection.query(`ALTER TABLE users ADD COLUMN city VARCHAR(255) DEFAULT ''`); } catch(e){}
+    try { await connection.query(`ALTER TABLE users ADD COLUMN state VARCHAR(255) DEFAULT 'Maharashtra'`); } catch(e){}
+    try { await connection.query(`ALTER TABLE users ADD COLUMN pincode VARCHAR(20) DEFAULT ''`); } catch(e){}
+    try { await connection.query(`ALTER TABLE users ADD COLUMN gstin_number VARCHAR(50) DEFAULT ''`); } catch(e){}
+    try { await connection.query(`ALTER TABLE users ADD COLUMN business_name VARCHAR(255) DEFAULT ''`); } catch(e){}
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS categories (
@@ -87,9 +92,11 @@ async function setupHostingerMySQL() {
         description TEXT,
         image_url TEXT,
         icon VARCHAR(50),
+        sort_order INT DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+    try { await connection.query(`ALTER TABLE categories ADD COLUMN sort_order INT DEFAULT 0`); } catch(e){}
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS subcategories (
@@ -331,6 +338,13 @@ async function setupHostingerMySQL() {
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    try { await connection.query(`ALTER TABLE product_reviews ADD COLUMN user_name VARCHAR(255)`); } catch(e){}
+    try { await connection.query(`ALTER TABLE product_reviews ADD COLUMN user_email VARCHAR(255)`); } catch(e){}
+    try { await connection.query(`ALTER TABLE product_reviews ADD COLUMN title VARCHAR(255)`); } catch(e){}
+    try { await connection.query(`ALTER TABLE product_reviews ADD COLUMN comment TEXT`); } catch(e){}
+    try { await connection.query(`ALTER TABLE product_reviews ADD COLUMN is_verified_buyer INT DEFAULT 1`); } catch(e){}
+    try { await connection.query(`ALTER TABLE product_reviews ADD COLUMN admin_reply TEXT`); } catch(e){}
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS custom_pages (

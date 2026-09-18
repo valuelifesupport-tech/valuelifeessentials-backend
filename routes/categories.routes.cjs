@@ -54,18 +54,31 @@ router.post('/api/categories', requireAdminAuth, async (req, res) => {
       finalSlug = `${slug}-${counter++}`;
     }
 
-    // Insert into MySQL
-    const myRes = await executeMySQL(
-      'INSERT INTO categories (name, slug, icon, image_url, description, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, finalSlug, icon || '🌿', image_url || null, description || '', Number(sort_order) || 0]
-    );
+    // Insert into MySQL with fallback
+    let myRes;
+    try {
+      myRes = await executeMySQL(
+        'INSERT INTO categories (name, slug, icon, image_url, description, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+        [name, finalSlug, icon || '🌿', image_url || null, description || '', Number(sort_order) || 0]
+      );
+    } catch (e) {
+      myRes = await executeMySQL(
+        'INSERT INTO categories (name, slug, icon, image_url, description) VALUES (?, ?, ?, ?, ?)',
+        [name, finalSlug, icon || '🌿', image_url || null, description || '']
+      );
+    }
     const newId = myRes ? myRes.insertId : Date.now();
 
     // Insert into SQLite
     try {
       db.prepare('INSERT OR REPLACE INTO categories (id, name, slug, icon, image_url, description, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(newId, name, finalSlug, icon || '🌿', image_url || null, description || '', Number(sort_order) || 0);
-    } catch (e) {}
+    } catch (e) {
+      try {
+        db.prepare('INSERT OR REPLACE INTO categories (id, name, slug, icon, image_url, description) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(newId, name, finalSlug, icon || '🌿', image_url || null, description || '');
+      } catch (e2) {}
+    }
 
     res.json({ id: newId, name, slug: finalSlug, icon: icon || '🌿', image_url, description, sort_order });
   } catch (err) {
@@ -80,15 +93,27 @@ router.put('/api/categories/:id', requireAdminAuth, async (req, res) => {
     const { name, icon, image_url, description, sort_order = 0 } = req.body;
     let slug = req.body.slug ? generateSlug(req.body.slug) : (name ? generateSlug(name) : undefined);
 
-    await executeMySQL(
-      'UPDATE categories SET name = COALESCE(?, name), slug = COALESCE(?, slug), icon = COALESCE(?, icon), image_url = COALESCE(?, image_url), description = COALESCE(?, description), sort_order = COALESCE(?, sort_order) WHERE id = ?',
-      [name, slug, icon, image_url, description, sort_order, id]
-    );
+    try {
+      await executeMySQL(
+        'UPDATE categories SET name = COALESCE(?, name), slug = COALESCE(?, slug), icon = COALESCE(?, icon), image_url = COALESCE(?, image_url), description = COALESCE(?, description), sort_order = COALESCE(?, sort_order) WHERE id = ?',
+        [name, slug, icon, image_url, description, sort_order, id]
+      );
+    } catch (e) {
+      await executeMySQL(
+        'UPDATE categories SET name = COALESCE(?, name), slug = COALESCE(?, slug), icon = COALESCE(?, icon), image_url = COALESCE(?, image_url), description = COALESCE(?, description) WHERE id = ?',
+        [name, slug, icon, image_url, description, id]
+      );
+    }
 
     try {
       db.prepare('UPDATE categories SET name = COALESCE(?, name), slug = COALESCE(?, slug), icon = COALESCE(?, icon), image_url = COALESCE(?, image_url), description = COALESCE(?, description), sort_order = COALESCE(?, sort_order) WHERE id = ?')
         .run(name, slug, icon, image_url, description, sort_order, id);
-    } catch (e) {}
+    } catch (e) {
+      try {
+        db.prepare('UPDATE categories SET name = COALESCE(?, name), slug = COALESCE(?, slug), icon = COALESCE(?, icon), image_url = COALESCE(?, image_url), description = COALESCE(?, description) WHERE id = ?')
+          .run(name, slug, icon, image_url, description, id);
+      } catch (e2) {}
+    }
 
     res.json({ success: true, id, message: 'Category updated successfully' });
   } catch (err) {

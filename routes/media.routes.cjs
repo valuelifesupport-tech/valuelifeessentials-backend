@@ -24,35 +24,44 @@ router.get(['/uploads/:filename', '/api/uploads/:filename', '/api/media/file/:fi
   return sendSvgFallback(res);
 });
 
-// Upload File
-router.post('/api/upload', upload.single('file'), async (req, res) => {
-  try {
-    if (req.file) {
-      const url = `/uploads/${req.file.filename}`;
-      return res.json({
-        url,
-        filename: req.file.filename,
-        originalName: req.file.originalname,
-        size: req.file.size
-      });
+// Upload File - accepts 'file', 'image', or any field name
+router.post('/api/upload', (req, res) => {
+  upload.any()(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message, code: err.code });
     }
-
-    // Base64 Data URL fallback
-    if (req.body && req.body.dataUrl) {
-      const match = req.body.dataUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
-      if (match) {
-        const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
-        const filename = `${Date.now()}-base64.${ext}`;
-        const buffer = Buffer.from(match[2], 'base64');
-        fs.writeFileSync(path.join(uploadsDir, filename), buffer);
-        return res.json({ url: `/uploads/${filename}`, filename });
+    try {
+      const file = (req.files && req.files.length > 0) ? req.files[0] : req.file;
+      if (file) {
+        const url = `/uploads/${file.filename}`;
+        return res.json({
+          url,
+          imageUrl: url,
+          fullUrl: url,
+          filename: file.filename,
+          originalName: file.originalname,
+          size: file.size
+        });
       }
-    }
 
-    return res.status(400).json({ error: 'No file or valid dataUrl uploaded' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+      // Base64 Data URL fallback
+      if (req.body && req.body.dataUrl) {
+        const match = req.body.dataUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+        if (match) {
+          const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+          const filename = `${Date.now()}-base64.${ext}`;
+          const buffer = Buffer.from(match[2], 'base64');
+          fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+          const url = `/uploads/${filename}`;
+          return res.json({ url, imageUrl: url, fullUrl: url, filename });
+        }
+      }
+
+      return res.status(400).json({ error: 'No file or valid dataUrl uploaded' });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 });
 
 // List Media Files
@@ -119,6 +128,40 @@ router.post('/api/media/replace', requireAdminAuth, upload.single('file'), async
     res.json({ success: true, url: `/uploads/${cleanTarget}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// High-performance image proxy for CDN / Amazon images
+router.get('/api/media/proxy', async (req, res) => {
+  try {
+    const rawUrl = req.query.url;
+    if (!rawUrl || typeof rawUrl !== 'string') {
+      return sendSvgFallback(res);
+    }
+    const targetUrl = decodeURIComponent(rawUrl).trim();
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      return sendSvgFallback(res);
+    }
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+      }
+    });
+
+    if (!response.ok) {
+      return sendSvgFallback(res);
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+
+    const arrayBuffer = await response.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    return sendSvgFallback(res);
   }
 });
 

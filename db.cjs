@@ -473,6 +473,15 @@ function initDb() {
       phone TEXT,
       password TEXT,
       role TEXT DEFAULT 'CUSTOMER',
+      address TEXT,
+      city TEXT DEFAULT '',
+      state TEXT DEFAULT 'Maharashtra',
+      pincode TEXT DEFAULT '',
+      gstin_number TEXT DEFAULT '',
+      business_name TEXT DEFAULT '',
+      is_verified INTEGER DEFAULT 0,
+      email_otp TEXT,
+      email_otp_expires TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 

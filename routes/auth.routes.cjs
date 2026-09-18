@@ -404,60 +404,192 @@ router.post('/api/auth/login', rateLimiter(20, 60000), async (req, res) => {
   }
 });
 
-// GET Customer Profile
+// GET Customer Profile (with full address, city, state, pincode, gstin)
 router.get('/api/users/:email/profile', async (req, res) => {
   try {
-    const email = req.params.email.toLowerCase();
+    const identifier = String(req.params.email || '').trim().toLowerCase();
     let users = [];
     try {
-      users = await executeMySQL('SELECT id, name, email, phone, role, address FROM users WHERE LOWER(email) = ?', [email]);
+      users = await executeMySQL(
+        'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?',
+        [identifier, identifier, identifier]
+      );
     } catch (e) {}
 
     if (!users || users.length === 0) {
       try {
-        users = [db.prepare('SELECT id, name, email, phone, role, address FROM users WHERE LOWER(email) = ?').get(email)];
+        const row = db.prepare(
+          'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?'
+        ).get(identifier, identifier, identifier);
+        if (row) users = [row];
       } catch (e) {}
     }
 
     if (!users || !users[0]) return res.status(404).json({ error: 'User not found' });
     const u = users[0];
-    if (!u.address) {
+
+    // Fallback: If address fields are empty, check latest order
+    if (!u.address || !u.city || !u.pincode) {
       try {
         const prevOrder = await executeMySQL(
-          'SELECT shipping_address FROM orders WHERE (user_id = ? OR LOWER(customer_email) = ? OR customer_phone = ?) AND shipping_address IS NOT NULL AND shipping_address != "" ORDER BY id DESC LIMIT 1',
+          'SELECT shipping_address, shipping_city, shipping_state, shipping_pincode FROM orders WHERE (user_id = ? OR LOWER(customer_email) = ? OR customer_phone = ?) AND shipping_address IS NOT NULL AND shipping_address != "" ORDER BY id DESC LIMIT 1',
           [u.id, (u.email || '').toLowerCase(), u.phone || '']
         );
-        if (prevOrder && prevOrder.length > 0 && prevOrder[0].shipping_address) {
-          u.address = prevOrder[0].shipping_address;
-          await executeMySQL('UPDATE users SET address = ? WHERE id = ?', [u.address, u.id]);
+        if (prevOrder && prevOrder.length > 0) {
+          const ord = prevOrder[0];
+          if (!u.address && ord.shipping_address) u.address = ord.shipping_address;
+          if (!u.city && ord.shipping_city) u.city = ord.shipping_city;
+          if (!u.state && ord.shipping_state) u.state = ord.shipping_state;
+          if (!u.pincode && ord.shipping_pincode) u.pincode = ord.shipping_pincode;
+
+          await executeMySQL(
+            'UPDATE users SET address = ?, city = ?, state = ?, pincode = ? WHERE id = ?',
+            [u.address || '', u.city || '', u.state || 'Maharashtra', u.pincode || '', u.id]
+          );
         }
       } catch (e) {}
     }
-    res.json(u);
+
+    res.json({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      phone: u.phone || '',
+      role: u.role || 'CUSTOMER',
+      address: u.address || '',
+      city: u.city || '',
+      state: u.state || 'Maharashtra',
+      pincode: u.pincode || '',
+      gstin_number: u.gstin_number || '',
+      business_name: u.business_name || '',
+      is_verified: u.is_verified ?? 1
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT Customer Profile
+// PUT Customer Profile (Persists name, phone, address, city, state, pincode, gstin)
 router.put('/api/users/:email/profile', async (req, res) => {
   try {
-    const email = req.params.email.toLowerCase();
-    const { name, phone, address } = req.body;
+    const identifier = String(req.params.email || '').trim().toLowerCase();
+    const { 
+      name, 
+      phone, 
+      address, 
+      city = '', 
+      state = 'Maharashtra', 
+      pincode = '', 
+      gstin_number = '', 
+      business_name = '' 
+    } = req.body;
 
+    // 1. Check if user already exists
+    let existing = null;
     try {
-      await executeMySQL(
-        'UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ?',
-        [name, phone, address, email]
-      );
+      const rows = await executeMySQL('SELECT id FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
+      if (rows && rows.length > 0) existing = rows[0];
     } catch (e) {}
 
+    if (!existing) {
+      try {
+        const row = db.prepare('SELECT id FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
+        if (row) existing = row;
+      } catch (e) {}
+    }
+
+    if (!existing) {
+      // User doesn't exist yet: insert fresh record
+      const userEmail = identifier.includes('@') ? identifier : (req.body.email || `${identifier}@valuelifeessentials.com`);
+      const userPhone = phone || (!identifier.includes('@') ? identifier : '');
+      const userName = name || userEmail.split('@')[0];
+
+      try {
+        await executeMySQL(
+          `INSERT INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1)`,
+          [userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '']
+        );
+      } catch (e) {
+        try {
+          await executeMySQL(
+            'INSERT INTO users (name, email, phone, address, role, is_verified) VALUES (?, ?, ?, ?, "CUSTOMER", 1)',
+            [userName, userEmail, userPhone, address || '']
+          );
+        } catch (e2) {}
+      }
+
+      try {
+        db.prepare(
+          `INSERT OR REPLACE INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1)`
+        ).run(userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '');
+      } catch (e) {}
+    } else {
+      // User exists: perform update in MySQL
+      try {
+        await executeMySQL(
+          `UPDATE users SET 
+            name = COALESCE(?, name), 
+            phone = COALESCE(?, phone), 
+            address = COALESCE(?, address),
+            city = COALESCE(?, city),
+            state = COALESCE(?, state),
+            pincode = COALESCE(?, pincode),
+            gstin_number = COALESCE(?, gstin_number),
+            business_name = COALESCE(?, business_name)
+          WHERE LOWER(email) = ? OR phone = ? OR id = ?`,
+          [name, phone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier]
+        );
+      } catch (e) {
+        try {
+          await executeMySQL(
+            'UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?',
+            [name, phone, address, identifier, identifier, identifier]
+          );
+        } catch (e2) {}
+      }
+
+      // Perform update in SQLite
+      try {
+        db.prepare(`
+          UPDATE users SET 
+            name = COALESCE(?, name), 
+            phone = COALESCE(?, phone), 
+            address = COALESCE(?, address),
+            city = COALESCE(?, city),
+            state = COALESCE(?, state),
+            pincode = COALESCE(?, pincode),
+            gstin_number = COALESCE(?, gstin_number),
+            business_name = COALESCE(?, business_name)
+          WHERE LOWER(email) = ? OR phone = ? OR id = ?
+        `).run(name, phone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier);
+      } catch (e) {
+        try {
+          db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?')
+            .run(name, phone, address, identifier, identifier, identifier);
+        } catch (e2) {}
+      }
+    }
+
+    // Fetch updated user to return clean object
+    let updated = null;
     try {
-      db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ?')
-        .run(name, phone, address, email);
+      const rows = await executeMySQL('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
+      if (rows && rows.length > 0) updated = rows[0];
     } catch (e) {}
 
-    res.json({ success: true, message: 'Profile updated successfully' });
+    if (!updated) {
+      try {
+        updated = db.prepare('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
+      } catch (e) {}
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Profile and address updated successfully',
+      user: updated || { name, phone, address, city, state, pincode, gstin_number, business_name }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -502,20 +634,20 @@ router.post('/api/auth/change-password', async (req, res) => {
   }
 });
 
-// POST Forgot Password (Request OTP)
+// POST Forgot Password (Request OTP via Email/Phone)
 router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res) => {
   try {
-    const search = String(req.body.email || req.body.email_or_phone || req.body.identifier || '').trim().toLowerCase();
+    const search = String(req.body.email || req.body.email_or_phone || req.body.identifier || req.body.phone || '').trim().toLowerCase();
     if (!search) return res.status(400).json({ error: 'Registered Email or Phone number is required' });
 
     let users = [];
     try {
-      users = await executeMySQL('SELECT id, name, email FROM users WHERE LOWER(email) = ? OR phone = ?', [search, search]);
+      users = await executeMySQL('SELECT id, name, email, phone FROM users WHERE LOWER(email) = ? OR phone = ?', [search, search]);
     } catch (e) {}
 
     if (!users || users.length === 0) {
       try {
-        const row = db.prepare('SELECT id, name, email FROM users WHERE LOWER(email) = ? OR phone = ?').get(search, search);
+        const row = db.prepare('SELECT id, name, email, phone FROM users WHERE LOWER(email) = ? OR phone = ?').get(search, search);
         if (row) users = [row];
       } catch (e) {}
     }
@@ -535,7 +667,13 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
       db.prepare('UPDATE users SET email_otp = ?, email_otp_expires = ? WHERE id = ?').run(otp, expiresAt, user.id);
     } catch (e) {}
 
-    otpStore.set(`reset_${user.email.toLowerCase()}`, { otp, expiresAt: Number(expiresAt) });
+    const cleanEmail = (user.email || '').toLowerCase();
+    otpStore.set(`reset_${cleanEmail}`, { otp, expiresAt: Number(expiresAt), userId: user.id });
+    if (user.phone) {
+      otpStore.set(`reset_${user.phone}`, { otp, expiresAt: Number(expiresAt), userId: user.id });
+    }
+
+    console.log(`🔑 Password reset OTP for ${user.email} (${user.phone}): [${otp}]`);
 
     await sendEmailNotification(
       user.email,
@@ -552,62 +690,93 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
       </div>`
     );
 
-    res.json({ success: true, message: `Password reset OTP dispatched to ${user.email}. Valid for 10 minutes.` });
+    res.json({ 
+      success: true, 
+      email: user.email, 
+      phone: user.phone || '',
+      otp: process.env.NODE_ENV !== 'production' ? otp : undefined,
+      message: `Password reset OTP dispatched to ${user.email}. Valid for 10 minutes.` 
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST Reset Password (With OTP)
+// POST Reset Password (With OTP & auto-login support)
 router.post('/api/auth/reset-password', async (req, res) => {
   try {
-    const { email, otp, new_password } = req.body;
-    if (!email || !otp || !new_password) {
-      return res.status(400).json({ error: 'Email, OTP, and new password are required' });
+    const rawSearch = req.body.email || req.body.email_or_phone || req.body.identifier || req.body.phone || '';
+    const cleanSearch = String(rawSearch).trim().toLowerCase();
+    const cleanOtp = String(req.body.otp || req.body.pin || '').trim();
+    const newPassword = String(req.body.new_password || req.body.password || '').trim();
+
+    if (!cleanSearch || !cleanOtp || !newPassword) {
+      return res.status(400).json({ error: 'Email or Mobile Number, 6-digit OTP code, and new password are required.' });
     }
 
-    const cleanEmail = String(email).trim().toLowerCase();
-    const cleanOtp = String(otp).trim();
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
 
     let users = [];
     try {
-      users = await executeMySQL('SELECT id, email_otp, email_otp_expires FROM users WHERE LOWER(email) = ?', [cleanEmail]);
+      users = await executeMySQL('SELECT * FROM users WHERE LOWER(email) = ? OR phone = ?', [cleanSearch, cleanSearch]);
     } catch (e) {}
 
     if (!users || users.length === 0) {
       try {
-        const row = db.prepare('SELECT id, email_otp, email_otp_expires FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+        const row = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? OR phone = ?').get(cleanSearch, cleanSearch);
         if (row) users = [row];
       } catch (e) {}
     }
 
     if (!users || users.length === 0) {
-      return res.status(404).json({ error: 'No account found with this email' });
+      return res.status(404).json({ error: 'No user account found with this email or mobile number.' });
     }
 
     const user = users[0];
-    const memEntry = otpStore.get(`reset_${cleanEmail}`);
+    const cleanEmail = (user.email || '').toLowerCase();
+    const memEntry = otpStore.get(`reset_${cleanEmail}`) || (user.phone ? otpStore.get(`reset_${user.phone}`) : null);
     const validOtp = user.email_otp || (memEntry ? memEntry.otp : null);
 
     if (!validOtp || String(validOtp).trim() !== cleanOtp) {
-      return res.status(400).json({ error: 'Invalid password reset code' });
+      return res.status(400).json({ error: 'Invalid 6-digit verification code. Please check your email or request a new code.' });
     }
 
     const expiry = user.email_otp_expires ? Number(user.email_otp_expires) : (memEntry ? memEntry.expiresAt : 0);
     if (expiry && Date.now() > expiry) {
-      return res.status(400).json({ error: 'Password reset code has expired. Please request a new one.' });
+      return res.status(400).json({ error: 'Password reset code has expired. Please request a new code.' });
     }
 
-    const newHash = hashPassword(new_password);
+    const newHash = hashPassword(newPassword);
     try {
-      await executeMySQL('UPDATE users SET password = ?, email_otp = NULL, email_otp_expires = NULL WHERE id = ?', [newHash, user.id]);
+      await executeMySQL('UPDATE users SET password = ?, is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?', [newHash, user.id]);
     } catch (e) {}
     try {
-      db.prepare('UPDATE users SET password = ?, email_otp = NULL, email_otp_expires = NULL WHERE id = ?').run(newHash, user.id);
+      db.prepare('UPDATE users SET password = ?, is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?').run(newHash, user.id);
     } catch (e) {}
 
     otpStore.delete(`reset_${cleanEmail}`);
-    res.json({ success: true, message: 'Password reset successfully! You can now sign in with your new password.' });
+    if (user.phone) otpStore.delete(`reset_${user.phone}`);
+
+    const activeUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || '',
+      role: user.role || 'CUSTOMER',
+      address: user.address || '',
+      city: user.city || '',
+      state: user.state || 'Maharashtra',
+      pincode: user.pincode || '',
+      is_verified: 1
+    };
+
+    res.json({ 
+      success: true, 
+      message: 'Password reset successfully! Your new password is now active.',
+      user: activeUser
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
