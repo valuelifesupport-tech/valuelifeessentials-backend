@@ -15,7 +15,7 @@ router.post('/api/shipping/shiprocket/check-serviceability', async (req, res) =>
 
     const result = await shiprocketService.checkServiceability({
       deliveryPincode: String(delivery_pincode).trim(),
-      pickupPincode,
+      pickupPincode: pickup_pincode,
       weight,
       cod
     });
