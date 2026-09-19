@@ -136,7 +136,7 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
         if (isNotExpired && verifiedSubtotal >= minAmount) {
           appliedCouponCode = cpn.code;
           const val = Number(cpn.discount_value || 0);
-          if (cpn.discount_type === 'PERCENT' || cpn.discount_type === 'percentage') {
+          if (cpn.discount_type === 'PERCENT' || cpn.discount_type === 'percentage' || cpn.discount_type === 'PERCENTAGE') {
             verifiedDiscount = Math.round((verifiedSubtotal * val) / 100);
           } else {
             // Flat amount discount

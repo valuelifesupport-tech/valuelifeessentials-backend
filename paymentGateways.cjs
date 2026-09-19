@@ -126,23 +126,15 @@ class RazorpayGateway extends BaseGateway {
   }
 
   async verifyPayment({ razorpay_order_id, razorpay_payment_id, razorpay_signature, order_id }) {
-    if (!razorpay_payment_id) {
-      throw new Error('Missing razorpay_payment_id');
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+      return { success: false, verified: false, reason: 'Missing required payment fields' };
     }
 
-    let isValid = false;
-
-    // Check if real signature verification possible
-    if (this.hasLiveKeys && razorpay_signature && razorpay_order_id) {
-      const expectedSig = crypto
-        .createHmac('sha256', this.keySecret)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest('hex');
-      isValid = (razorpay_signature === expectedSig);
-    } else {
-      // Test mode: any payment id with pay_ or test is accepted
-      isValid = Boolean(razorpay_payment_id);
-    }
+    const expectedSig = crypto
+      .createHmac('sha256', this.keySecret)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+    const isValid = (razorpay_signature === expectedSig);
 
     return {
       success: true,
@@ -196,12 +188,13 @@ class PhonePeGateway extends BaseGateway {
   }
 
   async verifyPayment({ transaction_id }) {
+    console.warn('PhonePe verifyPayment: Gateway not configured');
     return {
-      success: true,
-      verified: true,
+      success: false,
+      verified: false,
+      reason: 'Gateway not configured',
       gateway: 'phonepe',
-      payment_id: transaction_id || `pp_pay_${Date.now()}`,
-      message: 'PhonePe payment verified'
+      payment_id: transaction_id || `pp_pay_${Date.now()}`
     };
   }
 }
@@ -240,9 +233,11 @@ class CashfreeGateway extends BaseGateway {
   }
 
   async verifyPayment({ payment_id }) {
+    console.warn('Cashfree verifyPayment: Gateway not configured');
     return {
-      success: true,
-      verified: true,
+      success: false,
+      verified: false,
+      reason: 'Gateway not configured',
       gateway: 'cashfree',
       payment_id: payment_id || `cf_pay_${Date.now()}`
     };
@@ -281,9 +276,11 @@ class PaytmGateway extends BaseGateway {
   }
 
   async verifyPayment({ payment_id }) {
+    console.warn('Paytm verifyPayment: Gateway not configured');
     return {
-      success: true,
-      verified: true,
+      success: false,
+      verified: false,
+      reason: 'Gateway not configured',
       gateway: 'paytm',
       payment_id: payment_id || `paytm_pay_${Date.now()}`
     };

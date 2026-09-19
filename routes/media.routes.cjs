@@ -25,7 +25,7 @@ router.get(['/uploads/:filename', '/api/uploads/:filename', '/api/media/file/:fi
 });
 
 // Upload File - accepts 'file', 'image', or any field name
-router.post('/api/upload', (req, res) => {
+router.post('/api/upload', requireAdminAuth, (req, res) => {
   upload.any()(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message, code: err.code });
@@ -33,6 +33,11 @@ router.post('/api/upload', (req, res) => {
     try {
       const file = (req.files && req.files.length > 0) ? req.files[0] : req.file;
       if (file) {
+        const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+        if (!allowedMimes.includes(file.mimetype)) {
+          if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+          return res.status(400).json({ error: 'Invalid file type. Only images are allowed.' });
+        }
         const url = `/uploads/${file.filename}`;
         return res.json({
           url,
@@ -117,6 +122,12 @@ router.post('/api/media/replace', requireAdminAuth, upload.single('file'), async
     if (!targetFilename || !req.file) {
       return res.status(400).json({ error: 'targetFilename and file are required' });
     }
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (!allowedMimes.includes(req.file.mimetype)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Invalid file type. Only images are allowed.' });
+    }
+
     const cleanTarget = path.basename(targetFilename);
     const targetPath = path.join(uploadsDir, cleanTarget);
 
@@ -140,6 +151,17 @@ router.get('/api/media/proxy', async (req, res) => {
     }
     const targetUrl = decodeURIComponent(rawUrl).trim();
     if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      return sendSvgFallback(res);
+    }
+    
+    let urlObj;
+    try {
+      urlObj = new URL(targetUrl);
+    } catch (e) {
+      return sendSvgFallback(res);
+    }
+    const hostname = urlObj.hostname;
+    if (['localhost', '127.0.0.1', '0.0.0.0', '169.254.169.254'].includes(hostname) || hostname.startsWith('10.') || hostname.startsWith('192.168.') || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)) {
       return sendSvgFallback(res);
     }
 

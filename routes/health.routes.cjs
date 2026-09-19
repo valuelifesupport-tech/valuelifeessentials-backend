@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { MAINTENANCE_PASSWORD } = require('../config/constants.cjs');
 const { executeMySQL, db } = require('../config/database.cjs');
+const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // Canonical Health & Root check
 router.get(['/', '/health', '/api/health'], (req, res) => {
@@ -44,7 +45,7 @@ router.get('/api/maintenance/status', async (req, res) => {
 });
 
 // Toggle Maintenance Status in DB
-router.post('/api/maintenance/toggle', async (req, res) => {
+router.post('/api/maintenance/toggle', requireAdminAuth, async (req, res) => {
   try {
     const { active, mode } = req.body || {};
     const newStatus = (active !== undefined ? active : mode) ? 1 : 0;

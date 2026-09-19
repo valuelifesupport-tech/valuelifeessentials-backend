@@ -43,6 +43,59 @@ async function enrichOrdersWithItems(orders) {
   return Array.isArray(orders) ? orderList : orderList[0];
 }
 
+// GET Public Order Tracking (by order_number or phone — limited info, NO AUTH)
+router.get('/api/orders/track', async (req, res) => {
+  try {
+    const query = (req.query.q || '').trim();
+    if (!query || query.length < 3) {
+      return res.status(400).json({ error: 'Please enter an order number or phone number (min 3 characters)' });
+    }
+
+    let order = null;
+    try {
+      const rows = await executeMySQL(
+        `SELECT id, order_number, customer_name, customer_phone, order_status, shipping_status, 
+                tracking_number, carrier, total_amount, currency, created_at, items_json
+         FROM orders 
+         WHERE LOWER(order_number) = LOWER(?) 
+            OR customer_phone LIKE ? 
+            OR id = ?
+         ORDER BY id DESC LIMIT 1`,
+        [query, `%${query}%`, query]
+      );
+      if (rows && rows.length > 0) order = rows[0];
+    } catch (e) {}
+
+    if (!order) {
+      try {
+        order = db.prepare(
+          `SELECT id, order_number, customer_name, customer_phone, order_status, shipping_status,
+                  tracking_number, carrier, total_amount, currency, created_at, items_json
+           FROM orders 
+           WHERE LOWER(order_number) = LOWER(?) 
+              OR customer_phone LIKE ?
+              OR id = ?
+           ORDER BY id DESC LIMIT 1`
+        ).get(query, `%${query}%`, query);
+      } catch (e) {}
+    }
+
+    if (!order) {
+      return res.status(404).json({ error: 'No order found with that order number or phone number' });
+    }
+
+    // Parse items
+    if (order.items_json) {
+      try { order.items = JSON.parse(order.items_json); } catch (e) { order.items = []; }
+    }
+    delete order.items_json;
+
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST Place Order
 router.post('/api/orders', async (req, res) => {
   try {
@@ -123,8 +176,9 @@ router.post('/api/orders', async (req, res) => {
       codBalance = 0;
     }
 
-    const paidAmount = (clientPaid !== undefined) ? Number(clientPaid) : (effectivePaymentMode === 'COD' ? 0 : payableNow);
-    const remainingAmount = (clientRemaining !== undefined) ? Number(clientRemaining) : Math.max(0, totalAmount - paidAmount);
+    // SECURITY: Never trust client-supplied payment amounts. Calculate server-side only.
+    const paidAmount = (effectivePaymentMode === 'COD') ? 0 : payableNow;
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
 
     const orderNumber = `VL-${Date.now().toString().slice(-6)}`;
     const itemsJsonString = JSON.stringify(orderItems);
@@ -454,10 +508,20 @@ router.put([
 router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], async (req, res) => {
   try {
     const id = req.params.id;
-    const { reason, notes } = req.body || {};
+    const { reason, notes, email } = req.body || {};
     // Restore stock for cancelled order items if not already cancelled
     try {
-      let ordRows = await executeMySQL('SELECT id, order_status FROM orders WHERE id = ? OR order_number = ?', [id, id]);
+      let ordRows = await executeMySQL('SELECT id, order_status, customer_email FROM orders WHERE id = ? OR order_number = ?', [id, id]);
+      
+      // SECURITY: Require matching email to cancel order
+      if (ordRows && ordRows.length > 0) {
+        const reqEmail = (email || '').trim().toLowerCase();
+        const orderEmail = (ordRows[0].customer_email || '').trim().toLowerCase();
+        if (!req.isAdmin && reqEmail !== orderEmail) {
+          return res.status(403).json({ error: 'Unauthorized: matching email required' });
+        }
+      }
+
       if (ordRows && ordRows.length > 0 && ordRows[0].order_status !== 'CANCELLED') {
         const orderPk = ordRows[0].id;
         const oItems = await executeMySQL('SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?', [orderPk]);

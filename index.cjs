@@ -18,24 +18,37 @@ const errorHandler = require('./middleware/errorHandler.cjs');
 const app = express();
 
 // UNIVERSAL CORS & SECURITY HEADERS
+const ALLOWED_ORIGINS = new Set([
+  'https://valuelifeessentials.com',
+  'https://www.valuelifeessentials.com',
+  'https://admin.valuelifeessentials.com',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000'
+]);
+
 app.use((req, res, next) => {
-  const origin = req.headers.origin || '*';
-  res.header('Access-Control-Allow-Origin', origin);
+  const origin = req.headers.origin || '';
+  if (ALLOWED_ORIGINS.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  } else {
+    res.header('Access-Control-Allow-Origin', '*');
+    // Don't set credentials for wildcard origin
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
 
-  // Mirror requested headers dynamically to support any frontend header including x-admin-token
   const reqHeaders = req.headers['access-control-request-headers'];
   if (reqHeaders) {
     res.header('Access-Control-Allow-Headers', reqHeaders);
   } else {
     res.header(
       'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-token, X-Admin-Token, x-admin-key, X-Admin-Key, x-auth-token, X-Auth-Token, Cache-Control, Pragma, *'
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-token, X-Admin-Token, x-admin-key, X-Admin-Key, x-auth-token, X-Auth-Token, Cache-Control, Pragma'
     );
   }
 
-  res.header('Access-Control-Expose-Headers', '*');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Expose-Headers', 'Content-Disposition, X-Total-Count');
   res.header('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {
@@ -45,25 +58,21 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({
-  origin: true,
+  origin: (incomingOrigin, callback) => {
+    if (!incomingOrigin || ALLOWED_ORIGINS.has(incomingOrigin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
   allowedHeaders: [
-    'Origin',
-    'X-Requested-With',
-    'Content-Type',
-    'Accept',
-    'Authorization',
-    'x-admin-token',
-    'X-Admin-Token',
-    'x-admin-key',
-    'X-Admin-Key',
-    'x-auth-token',
-    'X-Auth-Token',
-    'Cache-Control',
-    'Pragma'
-  ],
-  exposedHeaders: ['*']
+    'Origin', 'X-Requested-With', 'Content-Type', 'Accept',
+    'Authorization', 'x-admin-token', 'X-Admin-Token',
+    'x-admin-key', 'X-Admin-Key', 'x-auth-token', 'X-Auth-Token',
+    'Cache-Control', 'Pragma'
+  ]
 }));
 
 app.use(express.json({ limit: '50mb' }));

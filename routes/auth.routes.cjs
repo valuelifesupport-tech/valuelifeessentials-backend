@@ -3,12 +3,20 @@ const router = express.Router();
 const crypto = require('crypto');
 const { db, executeMySQL } = require('../config/database.cjs');
 const { ADMIN_SECRET_KEY, ADMIN_PASSWORD } = require('../config/constants.cjs');
-const { hashPassword, verifyPassword, activeAdminTokens } = require('../middleware/auth.cjs');
+const { hashPassword, verifyPassword, activeAdminTokens, registerToken } = require('../middleware/auth.cjs');
 const rateLimiter = require('../middleware/rateLimiter.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 
 // In-memory OTP cache fallback
 const otpStore = new Map(); // key: email/phone, value: { otp, expiresAt, userData }
+
+// Auto-cleanup expired OTPs every 5 minutes to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of otpStore) {
+    if (val.expiresAt && val.expiresAt < now) otpStore.delete(key);
+  }
+}, 5 * 60 * 1000);
 
 // POST Admin Login
 router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
@@ -19,7 +27,7 @@ router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
     }
 
     const cleanPass = String(password).trim();
-    let isValid = (cleanPass === ADMIN_PASSWORD || cleanPass === 'valuelife2026' || cleanPass === 'admin123');
+    let isValid = (cleanPass === ADMIN_PASSWORD);
 
     // Also check MySQL admin user if exists
     if (!isValid && email) {
@@ -36,7 +44,7 @@ router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
     }
 
     const token = `admin_tok_${crypto.randomBytes(24).toString('hex')}`;
-    activeAdminTokens.add(token);
+    registerToken(token);
 
     res.json({
       success: true,
@@ -694,7 +702,7 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
       success: true, 
       email: user.email, 
       phone: user.phone || '',
-      otp: process.env.NODE_ENV !== 'production' ? otp : undefined,
+      // SECURITY: OTP is never returned in the response. It must be sent via email/SMS only.
       message: `Password reset OTP dispatched to ${user.email}. Valid for 10 minutes.` 
     });
   } catch (err) {

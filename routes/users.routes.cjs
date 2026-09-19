@@ -39,6 +39,43 @@ router.get('/api/admin/users', requireAdminAuth, async (req, res) => {
   }
 });
 
+// GET Export Users CSV
+router.get('/api/admin/users/export', requireAdminAuth, async (req, res) => {
+  try {
+    let users = await executeMySQL('SELECT id, name, email, phone, address, role, is_verified, created_at FROM users ORDER BY id DESC');
+    if (!users || users.length === 0) {
+      users = db.prepare('SELECT id, name, email, phone, address, role, is_verified, created_at FROM users ORDER BY id DESC').all() || [];
+    }
+
+    const orders = await executeMySQL('SELECT user_id, customer_email, customer_phone, total_amount FROM orders') || [];
+
+    const csvHeader = 'ID,Name,Email,Phone,Address,Role,Verified,Created,Total Orders,Total Spent\n';
+    const csvRows = (users || []).map(u => {
+      const uEmail = (u.email || '').trim().toLowerCase();
+      const uPhoneDigits = (u.phone || '').replace(/\D/g, '').slice(-10);
+      const userOrders = orders.filter(o => {
+        if (u.id && o.user_id && Number(o.user_id) === Number(u.id)) return true;
+        if (uEmail && o.customer_email && o.customer_email.trim().toLowerCase() === uEmail) return true;
+        if (uPhoneDigits && o.customer_phone && o.customer_phone.replace(/\D/g, '').slice(-10) === uPhoneDigits) return true;
+        return false;
+      });
+      const totalSpent = userOrders.reduce((acc, o) => acc + Number(o.total_amount || 0), 0);
+      const escapeCsv = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
+      return [
+        u.id, escapeCsv(u.name), escapeCsv(u.email), escapeCsv(u.phone),
+        escapeCsv(u.address), u.role, u.is_verified ? 'Yes' : 'No',
+        u.created_at, userOrders.length, totalSpent.toFixed(2)
+      ].join(',');
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="users_export_${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(csvHeader + csvRows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUT Change User Role
 router.put('/api/admin/users/:id/role', requireAdminAuth, async (req, res) => {
   try {

@@ -13,6 +13,7 @@ const {
   getTransaction,
   listTransactions
 } = require('../utils/transactionAudit.cjs');
+const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // GET Payment Gateways
 router.get('/api/payment/gateways', (req, res) => {
@@ -220,6 +221,23 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
       console.warn(`[PriceSecurity] Unknown transaction attempt for order ${order_id || 'unknown'} and gateway order ${razorpay_order_id}`);
     }
 
+    // SECURITY: Ensure request includes matching order ownership info
+    if (existingTxn) {
+      const reqEmail = (req.body.email || req.body.customer_email || '').trim().toLowerCase();
+      const reqUserId = req.body.user_id ? Number(req.body.user_id) : null;
+      const txnEmail = (existingTxn.customer_email || '').trim().toLowerCase();
+      const txnUserId = existingTxn.user_id;
+
+      let hasAuthMatch = false;
+      if (req.isAdmin) hasAuthMatch = true;
+      if (txnEmail && txnEmail === reqEmail) hasAuthMatch = true;
+      if (txnUserId && txnUserId === reqUserId) hasAuthMatch = true;
+
+      if (!hasAuthMatch && (txnEmail || txnUserId)) {
+         return res.status(403).json({ error: 'Unauthorized: Missing or invalid order ownership information' });
+      }
+    }
+
     // -------------------------------------------------------------------------
     // STEP 4: RECORD VERIFICATION IN DATABASE
     // -------------------------------------------------------------------------
@@ -275,7 +293,12 @@ router.post('/api/payment/razorpay/webhook', async (req, res) => {
   try {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET || 'valuelife_webhook_secret_2026';
     const signature = req.headers['x-razorpay-signature'];
-    const expected = crypto.createHmac('sha256', secret).update(JSON.stringify(req.body)).digest('hex');
+    
+    // SECURITY: Webhook payload must use raw bytes for accurate HMAC.
+    // If req.rawBody is not set by a prior middleware, it falls back to JSON.stringify,
+    // which may cause signature mismatch if whitespace differs.
+    const payloadString = req.rawBody ? req.rawBody : JSON.stringify(req.body);
+    const expected = crypto.createHmac('sha256', secret).update(payloadString).digest('hex');
 
     if (signature === expected) {
       const event = req.body.event;
@@ -324,7 +347,7 @@ router.post('/api/payment/razorpay/webhook', async (req, res) => {
 });
 
 // GET Payment Transactions (Admin Audit Trail API)
-router.get('/api/payment/transactions', async (req, res) => {
+router.get('/api/payment/transactions', requireAdminAuth, async (req, res) => {
   try {
     const { limit = 50, offset = 0, status, search } = req.query;
     const result = await listTransactions({ limit, offset, status, search });
@@ -335,7 +358,7 @@ router.get('/api/payment/transactions', async (req, res) => {
 });
 
 // GET Single Transaction Audit Timeline
-router.get('/api/payment/transactions/:id', async (req, res) => {
+router.get('/api/payment/transactions/:id', requireAdminAuth, async (req, res) => {
   try {
     const txn = await getTransaction(req.params.id);
     if (!txn) {

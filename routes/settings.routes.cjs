@@ -3,6 +3,44 @@ const router = express.Router();
 const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
+// SECURITY: Column whitelists to prevent SQL injection via dynamic Object.keys
+const ALLOWED_SETTINGS_COLS = new Set([
+  'announcement_text', 'announcement_code', 'contact_phone', 'contact_email',
+  'partial_deposit_percent', 'enable_multi_currency', 'enable_cod', 'enable_partial_payment',
+  'prepaid_discount_percent', 'enable_gst', 'gstin_number', 'store_name', 'store_tagline',
+  'store_logo', 'store_favicon', 'currency', 'shipping_fee', 'free_shipping_threshold',
+  'address_line1', 'address_line2', 'city', 'state', 'country', 'pincode',
+  'instagram_url', 'facebook_url', 'twitter_url', 'youtube_url', 'whatsapp_number',
+  'google_analytics_id', 'meta_pixel_id', 'maintenance_mode', 'maintenance_password'
+]);
+const ALLOWED_HERO_COLS = new Set([
+  'headline', 'subheadline', 'badge_text', 'primary_cta_text', 'primary_cta_link',
+  'secondary_cta_text', 'secondary_cta_link', 'bg_image_url', 'bg_video_url',
+  'overlay_opacity', 'text_color', 'layout_style'
+]);
+const ALLOWED_THEME_COLS = new Set([
+  'primary_color', 'secondary_color', 'accent_color', 'font_family', 'heading_font',
+  'bg_color', 'text_color', 'border_radius', 'card_style'
+]);
+const ALLOWED_SECTIONS_COLS = new Set([
+  'show_announcement_bar', 'show_hero', 'show_categories', 'show_featured_products',
+  'show_editorial_promo', 'show_why_choose_us', 'show_bestsellers', 'show_brand_story',
+  'show_testimonials', 'show_instagram_feed', 'show_newsletter', 'show_footer',
+  'show_reviews', 'show_collections', 'show_banners'
+]);
+const ALLOWED_EDITORIAL_COLS = new Set([
+  'badge_text', 'title_part1', 'title_part2', 'subtitle', 'cta_text', 'cta_link',
+  'image_url', 'script_quote', 'quote_subtext', 'is_enabled'
+]);
+const ALLOWED_BRAND_STORY_COLS = new Set([
+  'badge_text', 'heading', 'overlay_title', 'overlay_subtitle', 'description',
+  'cta_text', 'cta_link', 'image_url', 'is_enabled'
+]);
+
+function sanitizeKeys(fields, allowedSet) {
+  return Object.keys(fields).filter(k => k !== 'id' && k !== 'updated_at' && allowedSet.has(k));
+}
+
 // GET Store Settings
 router.get('/api/settings', async (req, res) => {
   try {
@@ -36,7 +74,7 @@ router.get('/api/settings', async (req, res) => {
 router.put('/api/settings', requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
-    const keys = Object.keys(fields).filter(k => k !== 'id');
+    const keys = sanitizeKeys(fields, ALLOWED_SETTINGS_COLS);
     if (keys.length === 0) return res.json({ success: true });
 
     // Update MySQL
@@ -83,7 +121,7 @@ router.get('/api/hero-config', async (req, res) => {
 router.put('/api/admin/hero-config', requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
-    const keys = Object.keys(fields).filter(k => k !== 'id');
+    const keys = sanitizeKeys(fields, ALLOWED_HERO_COLS);
     if (keys.length === 0) return res.json({ success: true });
 
     const setSql = keys.map(k => `${k} = ?`).join(', ');
@@ -119,7 +157,7 @@ router.get('/api/theme-config', async (req, res) => {
 router.put('/api/admin/theme-config', requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
-    const keys = Object.keys(fields).filter(k => k !== 'id');
+    const keys = sanitizeKeys(fields, ALLOWED_THEME_COLS);
     if (keys.length === 0) return res.json({ success: true });
 
     const setSql = keys.map(k => `${k} = ?`).join(', ');
@@ -164,7 +202,7 @@ router.get(['/api/sections-config', '/api/admin/sections-config'], async (req, r
 router.put(['/api/sections-config', '/api/admin/sections-config'], requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
-    const keys = Object.keys(fields).filter(k => k !== 'id');
+    const keys = sanitizeKeys(fields, ALLOWED_SECTIONS_COLS);
     if (keys.length === 0) return res.json({ success: true });
 
     const setSql = keys.map(k => `${k} = ?`).join(', ');
@@ -180,7 +218,7 @@ router.put(['/api/sections-config', '/api/admin/sections-config'], requireAdminA
 });
 
 // GET State Taxes
-router.get('/api/admin/taxes/states', async (req, res) => {
+router.get('/api/admin/taxes/states', requireAdminAuth, async (req, res) => {
   try {
     let rows = await executeMySQL('SELECT * FROM state_tax_rates ORDER BY state_name ASC');
     if (!rows || rows.length === 0) {
@@ -216,7 +254,7 @@ router.post('/api/admin/taxes/states/reset', requireAdminAuth, async (req, res) 
 });
 
 // GET Collection Tax Overrides
-router.get('/api/admin/taxes/overrides', async (req, res) => {
+router.get('/api/admin/taxes/overrides', requireAdminAuth, async (req, res) => {
   try {
     const rows = await executeMySQL(`
       SELECT cto.*, c.name as collection_name
@@ -286,7 +324,7 @@ router.get(['/api/editorial-promo', '/api/admin/editorial-promo'], async (req, r
 router.put(['/api/editorial-promo', '/api/admin/editorial-promo'], requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
-    const keys = Object.keys(fields).filter(k => k !== 'id' && k !== 'updated_at');
+    const keys = sanitizeKeys(fields, ALLOWED_EDITORIAL_COLS);
     if (keys.length === 0) return res.json({ success: true });
 
     const setSql = keys.map(k => `${k} = ?`).join(', ');
@@ -338,7 +376,7 @@ router.get(['/api/brand-story', '/api/admin/brand-story'], async (req, res) => {
 router.put(['/api/brand-story', '/api/admin/brand-story'], requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
-    const keys = Object.keys(fields).filter(k => k !== 'id' && k !== 'updated_at');
+    const keys = sanitizeKeys(fields, ALLOWED_BRAND_STORY_COLS);
     if (keys.length === 0) return res.json({ success: true });
 
     const setSql = keys.map(k => `${k} = ?`).join(', ');

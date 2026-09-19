@@ -4,7 +4,7 @@ const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // GET Admin Reviews (With Product details and images)
-router.get('/api/admin/reviews', async (req, res) => {
+router.get('/api/admin/reviews', requireAdminAuth, async (req, res) => {
   try {
     let reviews = [];
     try {
@@ -74,6 +74,63 @@ router.get('/api/admin/reviews', async (req, res) => {
         product_thumbnail: prodThumbnail || 'https://images.unsplash.com/photo-1592417817098-8f3d6eb1b7a5?w=100'
       };
     });
+
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET Public Approved Reviews (for storefront testimonials — NO AUTH needed)
+router.get('/api/reviews', async (req, res) => {
+  try {
+    let reviews = [];
+    try {
+      reviews = await executeMySQL(`
+        SELECT r.id, r.product_id, r.user_name, r.customer_name, r.rating, r.title, r.review_title, 
+               r.comment, r.review_text, r.status, r.created_at, r.admin_reply,
+               p.title as product_title, p.image_url as product_thumbnail
+        FROM product_reviews r 
+        LEFT JOIN products p ON r.product_id = p.id 
+        WHERE r.status = 'APPROVED'
+        ORDER BY r.created_at DESC
+        LIMIT 20
+      `);
+    } catch (e) {}
+
+    if (!reviews || reviews.length === 0) {
+      try {
+        reviews = db.prepare(`
+          SELECT r.id, r.product_id, r.user_name, r.customer_name, r.rating, r.title, r.review_title,
+                 r.comment, r.review_text, r.status, r.created_at, r.admin_reply,
+                 p.title as product_title, p.image_url as product_thumbnail
+          FROM product_reviews r 
+          LEFT JOIN products p ON r.product_id = p.id 
+          WHERE r.status = 'APPROVED'
+          ORDER BY r.created_at DESC
+          LIMIT 20
+        `).all() || [];
+      } catch (e) {
+        try {
+          reviews = db.prepare("SELECT * FROM product_reviews WHERE status = 'APPROVED' ORDER BY created_at DESC LIMIT 20").all() || [];
+        } catch (e2) {}
+      }
+    }
+
+    const populated = (reviews || []).map(r => ({
+      id: r.id,
+      product_id: r.product_id,
+      user_name: r.user_name || r.customer_name || 'Verified Buyer',
+      customer_name: r.customer_name || r.user_name || 'Verified Buyer',
+      rating: r.rating,
+      title: r.title || r.review_title || '',
+      comment: r.comment || r.review_text || '',
+      status: r.status,
+      created_at: r.created_at,
+      admin_reply: r.admin_reply || '',
+      product_title: r.product_title || '',
+      product_thumbnail: r.product_thumbnail || ''
+    }));
 
     res.json(populated);
   } catch (err) {

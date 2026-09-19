@@ -138,9 +138,13 @@ router.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res)
 
 // GET Check SKU
 router.get('/api/check-sku', async (req, res) => {
-  const { sku, excludeId } = req.query;
-  const taken = await isSkuTaken(sku, excludeId);
-  res.json({ available: !taken });
+  try {
+    const { sku, excludeId } = req.query;
+    const taken = await isSkuTaken(sku, excludeId);
+    res.json({ available: !taken });
+  } catch (err) {
+    res.json({ available: true }); // Fail open — don't block product creation
+  }
 });
 
 // POST Create Product
@@ -345,7 +349,7 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
 });
 
 // PUT / PATCH Product Stock Update
-router.all(['/api/products/:id/stock'], async (req, res) => {
+router.all(['/api/products/:id/stock'], requireAdminAuth, async (req, res) => {
   if (req.method !== 'PUT' && req.method !== 'PATCH') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -366,7 +370,7 @@ router.all(['/api/products/:id/stock'], async (req, res) => {
 });
 
 // PUT / PATCH Variant Stock Update (Handles both /api/variants/:id/stock and /api/products/variants/:id/stock)
-router.all(['/api/variants/:id/stock', '/api/products/variants/:id/stock'], async (req, res) => {
+router.all(['/api/variants/:id/stock', '/api/products/variants/:id/stock'], requireAdminAuth, async (req, res) => {
   if (req.method !== 'PUT' && req.method !== 'PATCH') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -387,7 +391,7 @@ router.all(['/api/variants/:id/stock', '/api/products/variants/:id/stock'], asyn
 });
 
 // POST Create Variant for Product
-router.post(['/api/products/:id/variants', '/api/variants'], async (req, res) => {
+router.post(['/api/products/:id/variants', '/api/variants'], requireAdminAuth, async (req, res) => {
   try {
     const productId = req.params.id || req.body.product_id;
     if (!productId) return res.status(400).json({ error: 'Product ID is required' });
@@ -453,7 +457,7 @@ router.post(['/api/products/:id/variants', '/api/variants'], async (req, res) =>
 });
 
 // DELETE Variant
-router.delete(['/api/variants/:id', '/api/products/variants/:id'], async (req, res) => {
+router.delete(['/api/variants/:id', '/api/products/variants/:id'], requireAdminAuth, async (req, res) => {
   try {
     const variantId = req.params.id;
     await executeMySQL('DELETE FROM product_variants WHERE id = ?', [variantId]);

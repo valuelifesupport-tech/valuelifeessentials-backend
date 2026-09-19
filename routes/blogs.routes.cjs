@@ -158,7 +158,7 @@ router.get('/api/blogs/:slugOrId', async (req, res) => {
 // ==========================================
 
 // 4. GET All Blogs (Admin - includes drafts & unpublished)
-router.get(['/api/admin/blogs', '/api/admin/blog-posts'], async (req, res) => {
+router.get(['/api/admin/blogs', '/api/admin/blog-posts'], requireAdminAuth, async (req, res) => {
   try {
     let rows = await executeMySQL('SELECT * FROM blog_posts ORDER BY sort_order ASC, created_at DESC');
     if (!rows || rows.length === 0) {

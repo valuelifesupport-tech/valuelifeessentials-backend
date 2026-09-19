@@ -4,7 +4,7 @@ const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // GET All Coupons
-router.get('/api/coupons', async (req, res) => {
+router.get('/api/coupons', requireAdminAuth, async (req, res) => {
   try {
     let rows = await executeMySQL('SELECT * FROM coupons ORDER BY id DESC');
     if (!rows || rows.length === 0) {

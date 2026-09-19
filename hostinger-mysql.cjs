@@ -528,7 +528,7 @@ async function setupHostingerMySQL() {
         image_url TEXT NOT NULL,
         sort_order INT DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
+        FOREIGN KEY (review_id) REFERENCES product_reviews(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
@@ -611,13 +611,20 @@ let poolInstance = null;
 
 function getMySQLPool() {
   if (poolInstance) return poolInstance;
-  let mysqlHost = process.env.MYSQL_HOST || 'srv831.hstgr.io';
-  if (mysqlHost === 'localhost') mysqlHost = 'srv831.hstgr.io';
+  let mysqlHost = process.env.MYSQL_HOST;
+  if (!mysqlHost || mysqlHost === 'localhost') {
+    console.warn('⚠️ MYSQL_HOST not set in environment variables! Database connection may fail.');
+    mysqlHost = process.env.MYSQL_HOST || '127.0.0.1';
+  }
 
-  const user = process.env.MYSQL_USER || 'u439830852_admin';
-  const password = process.env.MYSQL_PASSWORD || 'Valuelife@support1';
-  const database = process.env.MYSQL_DATABASE || 'u439830852_valuelife';
+  const user = process.env.MYSQL_USER;
+  const password = process.env.MYSQL_PASSWORD;
+  const database = process.env.MYSQL_DATABASE;
   const port = Number(process.env.MYSQL_PORT) || 3306;
+
+  if (!user || !password || !database) {
+    console.warn('⚠️ MYSQL_USER, MYSQL_PASSWORD, or MYSQL_DATABASE not set! Set these environment variables for production.');
+  }
 
   try {
     poolInstance = mysql.createPool({

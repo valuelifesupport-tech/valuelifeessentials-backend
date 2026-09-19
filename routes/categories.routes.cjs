@@ -140,7 +140,7 @@ router.delete('/api/categories/:id', requireAdminAuth, async (req, res) => {
 });
 
 // POST Create Subcategory
-router.post('/api/subcategories', async (req, res) => {
+router.post('/api/subcategories', requireAdminAuth, async (req, res) => {
   try {
     const { category_id, name, sort_order = 0 } = req.body;
     if (!category_id || !name) return res.status(400).json({ error: 'category_id and name are required' });
@@ -164,7 +164,7 @@ router.post('/api/subcategories', async (req, res) => {
 });
 
 // PUT Update Subcategory
-router.put('/api/subcategories/:id', async (req, res) => {
+router.put('/api/subcategories/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const { name, sort_order = 0 } = req.body;
@@ -187,7 +187,7 @@ router.put('/api/subcategories/:id', async (req, res) => {
 });
 
 // DELETE Subcategory
-router.delete('/api/subcategories/:id', async (req, res) => {
+router.delete('/api/subcategories/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM subcategories WHERE id = ?', [id]);
