@@ -311,25 +311,27 @@ router.post('/api/orders', async (req, res) => {
       db.prepare(`
         INSERT OR REPLACE INTO orders (
           id, order_number, customer_name, customer_email, customer_phone,
-          shipping_address, country, currency, total_amount, paid_amount,
+          shipping_address, shipping_city, shipping_state, shipping_pincode, country, currency, total_amount, paid_amount,
           remaining_amount, payment_mode, payment_status, order_status,
           order_notes, gst_amount, courier_name, tracking_number,
           user_id, payment_gateway, state_name, subtotal, discount_amount,
           coupon_code, tax_amount, shipping_amount, payable_amount,
-          cod_balance_amount, is_partial_payment, remark
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          cod_balance_amount, is_partial_payment, remark, items_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         newOrderId, orderNumber, rawName, rawEmail, rawPhone,
-        rawAddress, country, currency, totalAmount, paidAmount,
+        rawAddress, effectiveCity, effectiveState, effectivePincode, country, currency, totalAmount, paidAmount,
         remainingAmount, effectivePaymentMode,
         (paidAmount >= totalAmount ? 'PAID' : (paidAmount > 0 ? 'PARTIAL_PAID' : 'PENDING')),
         (effectivePaymentMode === 'COD' ? 'PROCESSING' : 'PENDING_PAYMENT'),
         effectiveNotes, taxAmount, '', '',
-        finalUserId, payment_gateway, state_name, subtotal, discount,
+        finalUserId, payment_gateway, effectiveState, subtotal, discount,
         coupon_code || null, taxAmount, shippingAmount, payableNow,
-        codBalance, isPartial ? 1 : 0, effectiveNotes
+        codBalance, isPartial ? 1 : 0, effectiveNotes, itemsJsonString
       );
-    } catch (e) {}
+    } catch (e) {
+      console.warn('SQLite order insert notice:', e.message);
+    }
 
     // Insert Items into MySQL & SQLite + Decrement Stock
     for (const item of orderItems) {
