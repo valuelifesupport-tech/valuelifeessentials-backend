@@ -5,6 +5,18 @@ const { requireAdminAuth } = require('../middleware/auth.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 
+// Helper for strict 10-digit Indian phone normalization
+function sanitize10DigitPhone(raw) {
+  if (!raw) return '';
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 11 && (digits.startsWith('0') || digits.startsWith('1'))) return digits.slice(1);
+  if (digits.length === 10) return digits;
+  const m = digits.match(/[6-9]\d{9}/);
+  if (m) return m[0];
+  return digits.slice(-10);
+}
+
 // Helper to attach items to an array of orders or single order
 async function enrichOrdersWithItems(orders) {
   if (!orders || orders.length === 0) return [];
@@ -105,6 +117,9 @@ router.post('/api/orders', async (req, res) => {
       customer_email,
       customer_phone,
       shipping_address,
+      shipping_city,
+      shipping_state,
+      shipping_pincode,
       country = 'India',
       currency = 'INR',
       state_name = '',
@@ -126,12 +141,16 @@ router.post('/api/orders', async (req, res) => {
     } = req.body;
 
     const rawName = (customer_name || '').trim();
-    const rawPhone = (customer_phone || '').trim();
+    const rawPhone = sanitize10DigitPhone(customer_phone);
     const rawAddress = (shipping_address || '').trim();
     const rawEmail = (customer_email || '').trim().toLowerCase();
+    const effectiveState = (shipping_state || state_name || '').trim() || 'Maharashtra';
+    const pinMatch = rawAddress.match(/\b\d{6}\b/);
+    const effectivePincode = (shipping_pincode || (pinMatch ? pinMatch[0] : '')).trim();
+    const effectiveCity = (shipping_city || '').trim();
 
-    if (!rawName || !rawPhone || !rawAddress || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Missing required order details: name, phone, address, and items are mandatory.' });
+    if (!rawName || !rawPhone || rawPhone.length !== 10 || !rawAddress || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Valid customer name, 10-digit mobile number, shipping address, and items are mandatory.' });
     }
 
     // Determine payment mode & notes
@@ -231,21 +250,7 @@ router.post('/api/orders', async (req, res) => {
     }
 
     // Insert Order into MySQL
-    const insertSQL = `
-      INSERT INTO orders (
-        order_number, customer_name, customer_email, customer_phone,
-        shipping_address, country, currency, total_amount, paid_amount,
-        remaining_amount, payment_mode, payment_status, order_status,
-        order_notes, gst_amount, cgst_amount, sgst_amount, igst_amount,
-        customer_gstin, courier_name, tracking_number, created_at,
-        user_id, payment_gateway, gateway_order_id, gateway_payment_id,
-        state_name, subtotal, discount_amount, coupon_code, tax_amount,
-        shipping_amount, payable_amount, cod_balance_amount, is_partial_payment,
-        payment_method, remark, items_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
-    const isIntraState = !state_name || state_name.trim().toLowerCase() === 'maharashtra';
+    const isIntraState = !effectiveState || effectiveState.trim().toLowerCase() === 'maharashtra';
     let cgstAmount = 0;
     let sgstAmount = 0;
     let igstAmount = 0;
@@ -260,16 +265,30 @@ router.post('/api/orders', async (req, res) => {
       igstAmount = taxAmount;
     }
 
+    const insertSQL = `
+      INSERT INTO orders (
+        order_number, customer_name, customer_email, customer_phone,
+        shipping_address, shipping_city, shipping_state, shipping_pincode, country, currency, total_amount, paid_amount,
+        remaining_amount, payment_mode, payment_status, order_status,
+        order_notes, gst_amount, cgst_amount, sgst_amount, igst_amount,
+        customer_gstin, courier_name, tracking_number, created_at,
+        user_id, payment_gateway, gateway_order_id, gateway_payment_id,
+        state_name, subtotal, discount_amount, coupon_code, tax_amount,
+        shipping_amount, payable_amount, cod_balance_amount, is_partial_payment,
+        payment_method, remark, items_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
     const insertParams = [
       orderNumber, rawName, rawEmail, rawPhone,
-      rawAddress, country, currency, totalAmount, paidAmount,
+      rawAddress, effectiveCity, effectiveState, effectivePincode, country, currency, totalAmount, paidAmount,
       remainingAmount, effectivePaymentMode,
       (paidAmount >= totalAmount ? 'PAID' : (paidAmount > 0 ? 'PARTIAL_PAID' : 'PENDING')),
       (effectivePaymentMode === 'COD' ? 'PROCESSING' : 'PENDING_PAYMENT'),
       effectiveNotes, taxAmount, cgstAmount, sgstAmount, igstAmount,
       '', '', '',
       finalUserId, payment_gateway, gateway_order_id || null, gateway_payment_id || null,
-      state_name, subtotal, discount, coupon_code || null, taxAmount,
+      effectiveState, subtotal, discount, coupon_code || null, taxAmount,
       shippingAmount, payableNow, codBalance, isPartial ? 1 : 0,
       effectivePaymentMode, effectiveNotes, itemsJsonString
     ];
@@ -281,8 +300,8 @@ router.post('/api/orders', async (req, res) => {
     if ((finalUserId || rawEmail) && rawAddress) {
       try {
         await executeMySQL(
-          'UPDATE users SET address = ?, name = COALESCE(NULLIF(name, ""), ?), phone = COALESCE(NULLIF(phone, ""), ?) WHERE id = ? OR LOWER(email) = ?',
-          [rawAddress, rawName || '', rawPhone || '', finalUserId || 0, (rawEmail || '').toLowerCase()]
+          'UPDATE users SET address = ?, city = COALESCE(NULLIF(city, ""), ?), state = COALESCE(NULLIF(state, ""), ?), pincode = COALESCE(NULLIF(pincode, ""), ?), name = COALESCE(NULLIF(name, ""), ?), phone = COALESCE(NULLIF(phone, ""), ?) WHERE id = ? OR LOWER(email) = ?',
+          [rawAddress, effectiveCity, effectiveState, effectivePincode, rawName || '', rawPhone || '', finalUserId || 0, (rawEmail || '').toLowerCase()]
         );
       } catch (e) {}
     }
@@ -439,10 +458,20 @@ router.put([
       remark,
       notes,
       cancellation_reason,
-      cancellation_notes
+      cancellation_notes,
+      customer_name,
+      customer_email,
+      customer_phone,
+      shipping_address,
+      shipping_city,
+      shipping_state,
+      shipping_pincode,
+      state_name
     } = req.body;
 
     const noteVal = order_notes !== undefined ? order_notes : (remark !== undefined ? remark : notes);
+    const sanitizedPhone = customer_phone !== undefined ? (sanitize10DigitPhone(customer_phone) || customer_phone) : null;
+    const effectiveState = shipping_state !== undefined ? shipping_state : (state_name !== undefined ? state_name : null);
 
     await executeMySQL(
       `UPDATE orders SET
@@ -453,7 +482,15 @@ router.put([
         order_notes = COALESCE(?, order_notes),
         remark = COALESCE(?, remark),
         cancellation_reason = COALESCE(?, cancellation_reason),
-        cancellation_notes = COALESCE(?, cancellation_notes)
+        cancellation_notes = COALESCE(?, cancellation_notes),
+        customer_name = COALESCE(?, customer_name),
+        customer_email = COALESCE(?, customer_email),
+        customer_phone = COALESCE(?, customer_phone),
+        shipping_address = COALESCE(?, shipping_address),
+        shipping_city = COALESCE(?, shipping_city),
+        shipping_state = COALESCE(?, shipping_state),
+        shipping_pincode = COALESCE(?, shipping_pincode),
+        state_name = COALESCE(?, state_name)
       WHERE id = ? OR order_number = ?`,
       [
         order_status || null,
@@ -464,9 +501,30 @@ router.put([
         noteVal !== undefined ? noteVal : null,
         cancellation_reason !== undefined ? cancellation_reason : null,
         cancellation_notes !== undefined ? cancellation_notes : null,
+        customer_name !== undefined ? customer_name : null,
+        customer_email !== undefined ? customer_email : null,
+        sanitizedPhone,
+        shipping_address !== undefined ? shipping_address : null,
+        shipping_city !== undefined ? shipping_city : null,
+        effectiveState,
+        shipping_pincode !== undefined ? shipping_pincode : null,
+        effectiveState,
         id, id
       ]
     );
+
+    // If state updated, adjust tax breakdown
+    if (effectiveState) {
+      const isIntra = effectiveState.trim().toLowerCase() === 'maharashtra';
+      const ordRows = await executeMySQL('SELECT tax_amount FROM orders WHERE id = ? OR order_number = ?', [id, id]);
+      const taxAmt = Number(ordRows && ordRows[0] ? ordRows[0].tax_amount : 0);
+      if (taxAmt > 0) {
+        const cgst = isIntra ? Math.round((taxAmt / 2) * 100) / 100 : 0;
+        const sgst = isIntra ? Math.round((taxAmt - cgst) * 100) / 100 : 0;
+        const igst = !isIntra ? taxAmt : 0;
+        await executeMySQL('UPDATE orders SET cgst_amount = ?, sgst_amount = ?, igst_amount = ? WHERE id = ? OR order_number = ?', [cgst, sgst, igst, id, id]);
+      }
+    }
 
     try {
       db.prepare(`
@@ -478,7 +536,15 @@ router.put([
           order_notes = COALESCE(?, order_notes),
           remark = COALESCE(?, remark),
           cancellation_reason = COALESCE(?, cancellation_reason),
-          cancellation_notes = COALESCE(?, cancellation_notes)
+          cancellation_notes = COALESCE(?, cancellation_notes),
+          customer_name = COALESCE(?, customer_name),
+          customer_email = COALESCE(?, customer_email),
+          customer_phone = COALESCE(?, customer_phone),
+          shipping_address = COALESCE(?, shipping_address),
+          shipping_city = COALESCE(?, shipping_city),
+          shipping_state = COALESCE(?, shipping_state),
+          shipping_pincode = COALESCE(?, shipping_pincode),
+          state_name = COALESCE(?, state_name)
         WHERE id = ? OR order_number = ?
       `).run(
         order_status || null,
@@ -489,6 +555,14 @@ router.put([
         noteVal !== undefined ? noteVal : null,
         cancellation_reason !== undefined ? cancellation_reason : null,
         cancellation_notes !== undefined ? cancellation_notes : null,
+        customer_name !== undefined ? customer_name : null,
+        customer_email !== undefined ? customer_email : null,
+        sanitizedPhone,
+        shipping_address !== undefined ? shipping_address : null,
+        shipping_city !== undefined ? shipping_city : null,
+        effectiveState,
+        shipping_pincode !== undefined ? shipping_pincode : null,
+        effectiveState,
         id, id
       );
     } catch (e) {}

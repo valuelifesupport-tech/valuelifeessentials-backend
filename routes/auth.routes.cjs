@@ -18,6 +18,18 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
+// Helper: Normalize any Indian phone number strictly to clean 10 digits
+function sanitize10DigitPhone(raw) {
+  if (!raw) return '';
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length === 10) return digits;
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  const m = digits.match(/[6-9]\d{9}/);
+  if (m) return m[0];
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
 // POST Admin Login
 router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
   try {
@@ -70,7 +82,7 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
 
     const cleanEmail = String(email).trim().toLowerCase();
     const cleanName = (name && String(name).trim()) ? String(name).trim() : cleanEmail.split('@')[0];
-    const cleanPhone = (phone && String(phone).trim()) ? String(phone).trim().replace(/[^\d+]/g, '') : '';
+    const cleanPhone = sanitize10DigitPhone(phone);
     const passwordHash = hashPassword(String(password));
 
     // 1. Check if verified user already exists
@@ -335,13 +347,19 @@ router.post('/api/auth/login', rateLimiter(20, 60000), async (req, res) => {
     }
 
     let users = [];
+    const cleanSearchPhone = sanitize10DigitPhone(searchId);
     try {
-      users = await executeMySQL('SELECT * FROM users WHERE LOWER(email) = ? OR phone = ?', [searchId, searchId]);
+      users = await executeMySQL(
+        'SELECT * FROM users WHERE LOWER(email) = ? OR phone = ? OR (phone != "" AND phone = ?)', 
+        [searchId, searchId, cleanSearchPhone || 'NON_EXISTENT']
+      );
     } catch (e) {}
 
     if (!users || users.length === 0) {
       try {
-        const row = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? OR phone = ?').get(searchId, searchId);
+        const row = db.prepare(
+          'SELECT * FROM users WHERE LOWER(email) = ? OR phone = ? OR (phone != "" AND phone = ?)'
+        ).get(searchId, searchId, cleanSearchPhone || 'NON_EXISTENT');
         if (row) users = [row];
       } catch (e) {}
     }
@@ -492,6 +510,8 @@ router.put('/api/users/:email/profile', async (req, res) => {
       business_name = '' 
     } = req.body;
 
+    const cleanPhone = phone ? sanitize10DigitPhone(phone) : null;
+
     // 1. Check if user already exists
     let existing = null;
     try {
@@ -509,7 +529,7 @@ router.put('/api/users/:email/profile', async (req, res) => {
     if (!existing) {
       // User doesn't exist yet: insert fresh record
       const userEmail = identifier.includes('@') ? identifier : (req.body.email || `${identifier}@valuelifeessentials.com`);
-      const userPhone = phone || (!identifier.includes('@') ? identifier : '');
+      const userPhone = cleanPhone || (!identifier.includes('@') ? sanitize10DigitPhone(identifier) : '');
       const userName = name || userEmail.split('@')[0];
 
       try {
@@ -547,13 +567,13 @@ router.put('/api/users/:email/profile', async (req, res) => {
             gstin_number = COALESCE(?, gstin_number),
             business_name = COALESCE(?, business_name)
           WHERE LOWER(email) = ? OR phone = ? OR id = ?`,
-          [name, phone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier]
+          [name, cleanPhone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier]
         );
       } catch (e) {
         try {
           await executeMySQL(
             'UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?',
-            [name, phone, address, identifier, identifier, identifier]
+            [name, cleanPhone, address, identifier, identifier, identifier]
           );
         } catch (e2) {}
       }
@@ -571,11 +591,11 @@ router.put('/api/users/:email/profile', async (req, res) => {
             gstin_number = COALESCE(?, gstin_number),
             business_name = COALESCE(?, business_name)
           WHERE LOWER(email) = ? OR phone = ? OR id = ?
-        `).run(name, phone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier);
+        `).run(name, cleanPhone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier);
       } catch (e) {
         try {
           db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?')
-            .run(name, phone, address, identifier, identifier, identifier);
+            .run(name, cleanPhone, address, identifier, identifier, identifier);
         } catch (e2) {}
       }
     }

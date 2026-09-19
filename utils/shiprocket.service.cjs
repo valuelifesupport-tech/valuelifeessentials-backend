@@ -73,10 +73,13 @@ class ShiprocketService {
   }
 
   // 2. CHECK COURIER SERVICEABILITY & RATES FOR A PINCODE
-  async checkServiceability({ pickupPincode, deliveryPincode, weight = 0.5, cod = 0 }) {
-    const pickup = pickupPincode || this.defaultPickupPincode;
-    const delivery = deliveryPincode;
-    if (!delivery || String(delivery).length !== 6) {
+  async checkServiceability(params = {}) {
+    const pickup = params.pickupPincode || params.pickup_pincode || this.defaultPickupPincode;
+    const delivery = params.deliveryPincode || params.delivery_pincode;
+    const weight = params.weight || 0.5;
+    const cod = params.cod ? 1 : 0;
+
+    if (!delivery || String(delivery).trim().length !== 6) {
       throw new Error('Valid 6-digit delivery pincode is required');
     }
 
@@ -132,7 +135,9 @@ class ShiprocketService {
     const cleanPhone = String(order.customer_phone || '').replace(/\D/g, '').slice(-10) || '9876543210';
     
     const pincodeMatch = rawAddress.match(/\b\d{6}\b/);
-    const billingPincode = pincodeMatch ? pincodeMatch[0] : (order.pincode || '400001');
+    const billingPincode = order.shipping_pincode || (pincodeMatch ? pincodeMatch[0] : (order.pincode || '400001'));
+    const billingCity = order.shipping_city || order.city || 'Mumbai';
+    const billingState = order.shipping_state || order.state_name || 'Maharashtra';
 
     const nameParts = (order.customer_name || 'Valued Customer').trim().split(/\s+/);
     const firstName = nameParts[0] || 'Valued';
@@ -167,9 +172,9 @@ class ShiprocketService {
       billing_last_name: lastName,
       billing_address: rawAddress.slice(0, 120),
       billing_address_2: rawAddress.length > 120 ? rawAddress.slice(120, 240) : '',
-      billing_city: order.state_name || 'Mumbai',
+      billing_city: billingCity,
       billing_pincode: String(billingPincode),
-      billing_state: order.state_name || 'Maharashtra',
+      billing_state: billingState,
       billing_country: order.country || 'India',
       billing_email: order.customer_email || 'valuelifesupport@gmail.com',
       billing_phone: cleanPhone,
