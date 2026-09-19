@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { paymentManager } = require('../paymentGateways.cjs');
 const { executeMySQL, db } = require('../config/database.cjs');
 const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require('../config/constants.cjs');
+const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 const {
   initiatePaymentTransaction,
@@ -181,15 +182,65 @@ router.post(['/api/payment/failure', '/api/payment/razorpay/failure'], async (re
       raw_data: req.body
     });
 
-    // Optionally mark order status as PAYMENT_FAILED if order_id is present
+    // Mark order status as CANCELLED / FAILED and restore stock
     if (order_id) {
-      await executeMySQL(
-        'UPDATE orders SET payment_status = "FAILED" WHERE (id = ? OR order_number = ?) AND payment_status != "PAID"',
+      const ordRows = await executeMySQL(
+        'SELECT id, order_number, customer_name, customer_email, total_amount, payment_status, order_status FROM orders WHERE (id = ? OR order_number = ?) AND payment_status != "PAID"',
         [order_id, order_id]
       );
+      if (ordRows && ordRows.length > 0) {
+        const ord = ordRows[0];
+        await executeMySQL(
+          'UPDATE orders SET payment_status = "FAILED", order_status = "CANCELLED", cancellation_reason = ? WHERE id = ?',
+          [error_description || 'Payment checkout closed/cancelled', ord.id]
+        );
+        try {
+          db.prepare('UPDATE orders SET payment_status = "FAILED", order_status = "CANCELLED", cancellation_reason = ? WHERE id = ?')
+            .run(error_description || 'Payment checkout closed/cancelled', ord.id);
+        } catch (e) {}
+
+        // Restore reserved stock
+        try {
+          const oItems = await executeMySQL('SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?', [ord.id]);
+          if (Array.isArray(oItems)) {
+            for (const it of oItems) {
+              const qty = Math.max(1, Number(it.quantity) || 1);
+              if (it.variant_id) {
+                await executeMySQL('UPDATE product_variants SET stock = stock + ? WHERE id = ?', [qty, it.variant_id]);
+                try { db.prepare('UPDATE product_variants SET stock = stock + ? WHERE id = ?').run(qty, it.variant_id); } catch (e) {}
+              }
+              if (it.product_id) {
+                await executeMySQL('UPDATE products SET stock = stock + ? WHERE id = ?', [qty, it.product_id]);
+                try { db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(qty, it.product_id); } catch (e) {}
+              }
+            }
+          }
+        } catch (e) {}
+
+        // Dispatch Order Cancellation / Payment Incomplete Email
+        if (ord.customer_email) {
+          sendEmailNotification(
+            ord.customer_email,
+            `Order Cancelled / Payment Incomplete #${ord.order_number} | ValueLife Essentials`,
+            `<div style="font-family: Arial, sans-serif; padding: 25px; color: #164e3f; max-width: 600px; margin: 0 auto; border: 1px solid #fed7aa; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #ea580c; margin-bottom: 8px;">Order #${ord.order_number} — Payment Incomplete</h2>
+              <p style="color: #475569; font-size: 14px;">Hi ${ord.customer_name || 'Customer'},</p>
+              <p style="color: #475569; font-size: 14px;">Your online payment for Order <b>#${ord.order_number}</b> was not completed (checkout window closed or payment was cancelled). <b>No money was deducted from your account</b>.</p>
+              <div style="background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> #${ord.order_number}</p>
+                <p style="margin: 4px 0; font-size: 14px;"><b>Status:</b> <span style="color: #ea580c; font-weight: bold;">Cancelled / Unpaid</span></p>
+                <p style="margin: 4px 0; font-size: 14px;"><b>Order Amount:</b> ₹${Number(ord.total_amount).toLocaleString('en-IN')}</p>
+                <p style="margin: 4px 0; font-size: 14px;"><b>Reason:</b> ${error_description || 'Checkout closed before payment'}</p>
+              </div>
+              <p style="color: #475569; font-size: 14px;">If this was accidental or you wish to complete your purchase, your items are still waiting for you. You can return to <a href="https://valuelifeessentials.com" style="color: #164e3f; font-weight: bold;">ValueLife Essentials</a> anytime.</p>
+              <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">If you have any questions, contact us at valuelifesupport@gmail.com.</p>
+            </div>`
+          ).catch(e => console.warn('Payment cancel email warn:', e.message));
+        }
+      }
     }
 
-    res.json({ success: true, recorded: true, message: 'Payment failure logged in database' });
+    res.json({ success: true, recorded: true, message: 'Payment failure logged and order cancelled' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -264,24 +315,70 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
       });
     }
 
-    // 3. Mark order as PAID in MySQL
+    // 3. Mark order as PAID or PARTIAL_PAID in MySQL & SQLite
     const targetOrderId = order_id || (existingTxn ? existingTxn.order_id : null);
+    let confirmedOrder = null;
     if (targetOrderId) {
-      await executeMySQL(
-        'UPDATE orders SET payment_status = "PAID", paid_amount = total_amount, remaining_amount = 0, payment_gateway = "razorpay", gateway_payment_id = ?, transaction_id = ? WHERE id = ? OR order_number = ?',
-        [razorpay_payment_id || 'PAY_' + Date.now(), updatedTxn ? updatedTxn.transaction_id : transaction_id, targetOrderId, targetOrderId]
+      const ordRows = await executeMySQL(
+        'SELECT id, order_number, customer_name, customer_email, customer_phone, total_amount, payable_amount, paid_amount, remaining_amount, cod_balance_amount, is_partial_payment, payment_mode, shipping_address, payment_status FROM orders WHERE id = ? OR order_number = ?',
+        [targetOrderId, targetOrderId]
       );
-      try {
-        db.prepare('UPDATE orders SET payment_status = "PAID", transaction_id = ? WHERE id = ? OR order_number = ?')
-          .run(updatedTxn ? updatedTxn.transaction_id : transaction_id, targetOrderId, targetOrderId);
-      } catch (e) {}
+      if (ordRows && ordRows.length > 0) {
+        const ord = ordRows[0];
+        const isPartial = ord.is_partial_payment == 1 || ord.payment_mode === 'PARTIAL';
+        const newPaidAmount = isPartial ? Number(ord.payable_amount || ord.paid_amount || 0) : Number(ord.total_amount || 0);
+        const newRemainingAmount = isPartial ? Number(ord.cod_balance_amount || Math.max(0, Number(ord.total_amount) - newPaidAmount)) : 0;
+        const newPayStatus = isPartial ? 'PARTIAL_PAID' : 'PAID';
+        const wasAlreadyPaid = ord.payment_status === 'PAID' || ord.payment_status === 'PARTIAL_PAID';
+
+        await executeMySQL(
+          'UPDATE orders SET payment_status = ?, order_status = "PROCESSING", paid_amount = ?, remaining_amount = ?, payment_gateway = "razorpay", gateway_payment_id = ?, transaction_id = ? WHERE id = ?',
+          [newPayStatus, newPaidAmount, newRemainingAmount, razorpay_payment_id || 'PAY_' + Date.now(), updatedTxn ? updatedTxn.transaction_id : transaction_id, ord.id]
+        );
+        try {
+          db.prepare('UPDATE orders SET payment_status = ?, order_status = "PROCESSING", paid_amount = ?, remaining_amount = ?, transaction_id = ? WHERE id = ?')
+            .run(newPayStatus, newPaidAmount, newRemainingAmount, updatedTxn ? updatedTxn.transaction_id : transaction_id, ord.id);
+        } catch (e) {}
+
+        confirmedOrder = {
+          ...ord,
+          order_id: ord.id,
+          order_number: ord.order_number,
+          payment_status: newPayStatus,
+          order_status: 'PROCESSING',
+          paid_amount: newPaidAmount,
+          remaining_amount: newRemainingAmount
+        };
+
+        // DISPATCH OFFICIAL ORDER CONFIRMATION EMAIL UPON SUCCESSFUL PAYMENT
+        if (ord.customer_email && !wasAlreadyPaid) {
+          sendEmailNotification(
+            ord.customer_email,
+            `Order Confirmed #${ord.order_number} | ValueLife Essentials`,
+            `<div style="font-family: Arial, sans-serif; padding: 25px; color: #164e3f; max-width: 600px; margin: 0 auto; border: 1px solid #bbf7d0; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #164e3f; margin-bottom: 8px;">Thank you for your order, ${ord.customer_name || 'Valued Customer'}!</h2>
+              <p style="color: #475569; font-size: 14px;">Your payment has been successfully received via <b>Razorpay</b> and your order <b>#${ord.order_number}</b> is confirmed and being prepared for shipment.</p>
+              <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> #${ord.order_number}</p>
+                <p style="margin: 4px 0; font-size: 14px;"><b>Payment Status:</b> <span style="color: #16a34a; font-weight: bold;">${newPayStatus === 'PARTIAL_PAID' ? 'Partial Deposit Paid (Online via Razorpay)' : 'Paid in Full (Online via Razorpay)'}</span></p>
+                <p style="margin: 4px 0; font-size: 14px;"><b>Amount Paid Online:</b> ₹${newPaidAmount.toLocaleString('en-IN')}</p>
+                ${newRemainingAmount > 0 ? `<p style="margin: 4px 0; font-size: 14px; color: #b45309;"><b>COD Balance on Delivery:</b> ₹${newRemainingAmount.toLocaleString('en-IN')}</p>` : ''}
+                <p style="margin: 4px 0; font-size: 14px;"><b>Total Order Value:</b> ₹${Number(ord.total_amount).toLocaleString('en-IN')}</p>
+                <p style="margin: 4px 0; font-size: 14px;"><b>Delivery Address:</b> ${ord.shipping_address || 'Provided at checkout'}</p>
+              </div>
+              <p style="font-size: 12px; color: #94a3b8;">You can track real-time shipment updates anytime by signing into your ValueLife account.</p>
+            </div>`
+          ).catch(e => console.warn('Payment verify email warn:', e.message));
+        }
+      }
     }
 
     res.json({
       success: true,
       verified: true,
       transaction_id: updatedTxn ? updatedTxn.transaction_id : transaction_id,
-      message: 'Payment signature verified and transaction finalized'
+      order: confirmedOrder,
+      message: 'Payment signature verified and order confirmed successfully'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

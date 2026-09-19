@@ -265,7 +265,7 @@ router.post('/api/orders', async (req, res) => {
       rawAddress, country, currency, totalAmount, paidAmount,
       remainingAmount, effectivePaymentMode,
       (paidAmount >= totalAmount ? 'PAID' : (paidAmount > 0 ? 'PARTIAL_PAID' : 'PENDING')),
-      'PROCESSING',
+      (effectivePaymentMode === 'COD' ? 'PROCESSING' : 'PENDING_PAYMENT'),
       effectiveNotes, taxAmount, cgstAmount, sgstAmount, igstAmount,
       '', '', '',
       finalUserId, payment_gateway, gateway_order_id || null, gateway_payment_id || null,
@@ -304,7 +304,7 @@ router.post('/api/orders', async (req, res) => {
         rawAddress, country, currency, totalAmount, paidAmount,
         remainingAmount, effectivePaymentMode,
         (paidAmount >= totalAmount ? 'PAID' : (paidAmount > 0 ? 'PARTIAL_PAID' : 'PENDING')),
-        'PROCESSING',
+        (effectivePaymentMode === 'COD' ? 'PROCESSING' : 'PENDING_PAYMENT'),
         effectiveNotes, taxAmount, '', '',
         finalUserId, payment_gateway, state_name, subtotal, discount,
         coupon_code || null, taxAmount, shippingAmount, payableNow,
@@ -349,19 +349,20 @@ router.post('/api/orders', async (req, res) => {
       }
     }
 
-    // Send confirmation email
-    if (rawEmail) {
+    // Send confirmation email ONLY for Cash on Delivery (COD) orders immediately on creation.
+    // For online payments (Razorpay), confirmation email will be dispatched strictly upon verified payment!
+    if (effectivePaymentMode === 'COD' && rawEmail) {
       sendEmailNotification(
         rawEmail,
         `Order Confirmed #${orderNumber} | ValueLife Essentials`,
         `<div style="font-family: Arial, sans-serif; padding: 25px; color: #164e3f; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px;">
           <h2 style="color: #164e3f; margin-bottom: 8px;">Thank you for your order, ${rawName}!</h2>
-          <p style="color: #475569; font-size: 14px;">Your order <b>#${orderNumber}</b> has been received and is being prepared with 100% certified organic care.</p>
+          <p style="color: #475569; font-size: 14px;">Your Cash on Delivery (COD) order <b>#${orderNumber}</b> has been received and is being prepared with 100% certified organic care.</p>
           <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 15px; margin: 20px 0;">
             <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> ${orderNumber}</p>
             <p style="margin: 4px 0; font-size: 14px;"><b>Total Amount:</b> ₹${totalAmount.toLocaleString('en-IN')}</p>
-            <p style="margin: 4px 0; font-size: 14px;"><b>Payment Mode:</b> ${effectivePaymentMode}</p>
-            ${codBalance > 0 ? `<p style="margin: 4px 0; font-size: 14px; color: #b45309;"><b>COD Balance to Pay on Delivery:</b> ₹${codBalance.toLocaleString('en-IN')}</p>` : ''}
+            <p style="margin: 4px 0; font-size: 14px;"><b>Payment Mode:</b> Cash on Delivery (COD)</p>
+            <p style="margin: 4px 0; font-size: 14px; color: #b45309;"><b>Cash to Pay on Delivery:</b> ₹${totalAmount.toLocaleString('en-IN')}</p>
             <p style="margin: 4px 0; font-size: 14px;"><b>Delivery Address:</b> ${rawAddress}</p>
           </div>
           <p style="font-size: 12px; color: #94a3b8;">You can track real-time shipment updates anytime by signing into your ValueLife account.</p>
@@ -498,6 +499,23 @@ router.put([
       updated = [db.prepare('SELECT * FROM orders WHERE id = ? OR order_number = ?').get(id, id)];
     }
 
+    if (order_status === 'CANCELLED' && updated && updated[0]?.customer_email) {
+      sendEmailNotification(
+        updated[0].customer_email,
+        `Order #${updated[0].order_number || id} Cancelled | ValueLife Essentials`,
+        `<div style="font-family: Arial, sans-serif; padding: 25px; color: #164e3f; max-width: 600px; margin: 0 auto; border: 1px solid #fed7aa; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #dc2626; margin-bottom: 8px;">Order #${updated[0].order_number || id} has been Cancelled</h2>
+          <p style="color: #475569; font-size: 14px;">Hi ${updated[0].customer_name || 'Customer'},</p>
+          <p style="color: #475569; font-size: 14px;">Your order has been cancelled. Reason: <b>${cancellation_reason || 'Order cancelled'}</b>.</p>
+          <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 15px; margin: 20px 0;">
+            <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> #${updated[0].order_number || id}</p>
+            <p style="margin: 4px 0; font-size: 14px;"><b>Status:</b> CANCELLED</p>
+          </div>
+          <p style="font-size: 12px; color: #94a3b8;">If you have any questions, please reach out to us at valuelifesupport@gmail.com.</p>
+        </div>`
+      ).catch(() => {});
+    }
+
     res.json({ success: true, id, order: updated ? updated[0] : null });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -551,6 +569,29 @@ router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], async (req, re
       db.prepare('UPDATE orders SET order_status = "CANCELLED", cancellation_reason = COALESCE(?, cancellation_reason), cancellation_notes = COALESCE(?, cancellation_notes) WHERE id = ? OR order_number = ?')
         .run(reason || 'Cancelled by customer', notes || '', id, id);
     } catch (e) {}
+
+    // Dispatch Order Cancellation Email
+    try {
+      const ordRows = await executeMySQL('SELECT order_number, customer_name, customer_email, total_amount FROM orders WHERE id = ? OR order_number = ?', [id, id]);
+      if (ordRows && ordRows[0]?.customer_email) {
+        const ord = ordRows[0];
+        sendEmailNotification(
+          ord.customer_email,
+          `Order #${ord.order_number || id} Cancelled | ValueLife Essentials`,
+          `<div style="font-family: Arial, sans-serif; padding: 25px; color: #164e3f; max-width: 600px; margin: 0 auto; border: 1px solid #fed7aa; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #dc2626; margin-bottom: 8px;">Order #${ord.order_number || id} has been Cancelled</h2>
+            <p style="color: #475569; font-size: 14px;">Hi ${ord.customer_name || 'Customer'},</p>
+            <p style="color: #475569; font-size: 14px;">Your order has been cancelled. Reason: <b>${reason || 'Cancelled by customer'}</b>.</p>
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 15px; margin: 20px 0;">
+              <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> #${ord.order_number || id}</p>
+              <p style="margin: 4px 0; font-size: 14px;"><b>Status:</b> CANCELLED</p>
+            </div>
+            <p style="font-size: 12px; color: #94a3b8;">If you have any questions or this was done in error, please reach out to us at valuelifesupport@gmail.com.</p>
+          </div>`
+        ).catch(() => {});
+      }
+    } catch (e) {}
+
     res.json({ success: true, message: 'Order cancelled and stock restored successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
