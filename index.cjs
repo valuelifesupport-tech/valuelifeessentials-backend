@@ -1,4 +1,6 @@
+const path = require('path');
 require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 // PREVENT PROCESS CRASHES ON UNCAUGHT ERRORS
 process.on('uncaughtException', (err) => {
@@ -10,7 +12,6 @@ process.on('unhandledRejection', (reason, promise) => {
 
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const { PORT } = require('./config/constants.cjs');
 const { setupHostingerMySQL } = require('./config/database.cjs');
 const errorHandler = require('./middleware/errorHandler.cjs');
@@ -102,6 +103,7 @@ app.use(require('./routes/auth.routes.cjs'));
 app.use(require('./routes/payment.routes.cjs'));
 app.use(require('./routes/products.routes.cjs'));
 app.use(require('./routes/orders.routes.cjs'));
+app.use(require('./routes/shiprocket.routes.cjs'));
 
 // CENTRAL ERROR HANDLER
 app.use(errorHandler);
