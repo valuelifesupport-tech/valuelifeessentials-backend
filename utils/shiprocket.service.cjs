@@ -11,6 +11,7 @@ class ShiprocketService {
     this.email = process.env.SHIPROCKET_EMAIL || 'valuelifesupport@gmail.com';
     this.apiKey = process.env.SHIPROCKET_API_KEY || 'CqMn1w8MOq5s%%u$&y2JBuiJqqn$Wb3j';
     this.defaultPickupPincode = process.env.SHIPROCKET_DEFAULT_PICKUP_PINCODE || '400001';
+    this.channelId = process.env.SHIPROCKET_CHANNEL_ID || '12238334';
   }
 
   // 1. AUTHENTICATE AND OBTAIN 10-DAY JWT TOKEN
@@ -160,7 +161,7 @@ class ShiprocketService {
       order_id: String(order.id || orderNumber),
       order_date: orderDate,
       pickup_location: pickupLocation || 'Primary',
-      channel_id: '',
+      channel_id: String(this.channelId || '12238334'),
       comment: order.order_notes || order.remark || 'ValueLife Organic Superstore Order',
       billing_customer_name: firstName,
       billing_last_name: lastName,
@@ -413,6 +414,27 @@ class ShiprocketService {
         error: err.message
       };
     }
+  }
+
+  // 10. GET REGISTERED PICKUP ADDRESSES / WAREHOUSES
+  async getPickupAddresses() {
+    const res = await this.makeRequest('/settings/company/pickup', { method: 'GET' });
+    return res.data;
+  }
+
+  // 11. ADD NEW PICKUP WAREHOUSE ADDRESS
+  async addPickupAddress(addressData) {
+    const res = await this.makeRequest('/settings/company/addpickup', {
+      method: 'POST',
+      body: JSON.stringify(addressData)
+    });
+    return res.data;
+  }
+
+  // 12. GET CONNECTED CHANNELS
+  async getChannels() {
+    const res = await this.makeRequest('/channels', { method: 'GET' });
+    return res.data;
   }
 }
 

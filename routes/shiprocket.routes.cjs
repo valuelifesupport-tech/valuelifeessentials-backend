@@ -420,4 +420,34 @@ router.get('/api/shipping/shiprocket/account-overview', async (req, res) => {
   }
 });
 
+// 11. ADMIN: GET CONNECTED CHANNELS
+router.get('/api/shipping/shiprocket/channels', async (req, res) => {
+  try {
+    const channels = await shiprocketService.getChannels();
+    res.json(channels);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. ADMIN: GET REGISTERED PICKUP ADDRESSES
+router.get('/api/shipping/shiprocket/pickup-addresses', async (req, res) => {
+  try {
+    const pickups = await shiprocketService.getPickupAddresses();
+    res.json(pickups);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 13. ADMIN: ADD WAREHOUSE PICKUP ADDRESS
+router.post('/api/shipping/shiprocket/add-pickup-address', async (req, res) => {
+  try {
+    const result = await shiprocketService.addPickupAddress(req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
