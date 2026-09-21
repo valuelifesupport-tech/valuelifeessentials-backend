@@ -224,8 +224,8 @@ router.post('/api/orders', async (req, res) => {
         // Create customer in MySQL
         const custHash = 'cust_' + Date.now().toString(36);
         const insUserRes = await executeMySQL(
-          'INSERT INTO users (name, email, phone, password, address, role, is_verified, created_at) VALUES (?, ?, ?, ?, ?, "CUSTOMER", 1, NOW())',
-          [rawName, rawEmail || null, rawPhone, custHash, rawAddress]
+          'INSERT INTO users (name, email, phone, password, address, city, state, pincode, role, is_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "CUSTOMER", 1, NOW())',
+          [rawName, rawEmail || null, rawPhone, custHash, rawAddress, effectiveCity, effectiveState, effectivePincode]
         );
         if (insUserRes && insUserRes.insertId) {
           finalUserId = insUserRes.insertId;
@@ -234,16 +234,20 @@ router.post('/api/orders', async (req, res) => {
         }
 
         try {
-          db.prepare('INSERT OR IGNORE INTO users (id, name, email, phone, address, role, is_verified, created_at) VALUES (?, ?, ?, ?, ?, "CUSTOMER", 1, datetime("now"))')
-            .run(finalUserId, rawName, rawEmail || null, rawPhone, rawAddress);
+          db.prepare('INSERT OR IGNORE INTO users (id, name, email, phone, address, city, state, pincode, role, is_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "CUSTOMER", 1, datetime("now"))')
+            .run(finalUserId, rawName, rawEmail || null, rawPhone, rawAddress, effectiveCity, effectiveState, effectivePincode);
         } catch (e) {}
       } else {
         finalUserId = existingUser.id;
-        // Update user address/phone if missing
+        // Update user address/phone/city/state/pincode
         await executeMySQL(
-          'UPDATE users SET address = COALESCE(NULLIF(address, ""), ?), phone = COALESCE(NULLIF(phone, ""), ?) WHERE id = ?',
-          [rawAddress, rawPhone, finalUserId]
+          'UPDATE users SET address = COALESCE(NULLIF(address, ""), ?), phone = COALESCE(NULLIF(phone, ""), ?), city = COALESCE(NULLIF(?, ""), city), state = COALESCE(NULLIF(?, ""), state), pincode = COALESCE(NULLIF(?, ""), pincode) WHERE id = ?',
+          [rawAddress, rawPhone, effectiveCity, effectiveState, effectivePincode, finalUserId]
         );
+        try {
+          db.prepare('UPDATE users SET address = COALESCE(NULLIF(address, ""), ?), phone = COALESCE(NULLIF(phone, ""), ?), city = COALESCE(NULLIF(?, ""), city), state = COALESCE(NULLIF(?, ""), state), pincode = COALESCE(NULLIF(?, ""), pincode) WHERE id = ?')
+            .run(rawAddress, rawPhone, effectiveCity, effectiveState, effectivePincode, finalUserId);
+        } catch (e) {}
       }
     } catch (uErr) {
       console.warn('Customer upsert notification:', uErr.message);
