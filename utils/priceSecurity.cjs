@@ -10,7 +10,40 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     throw new Error('Order must contain at least one valid item');
   }
 
+  // 1. Fetch Store Tax Settings (Mode & Default GST Rate)
+  let isTaxInclusive = true;
+  let defaultStoreGstRate = 5;
+  try {
+    const setRows = await executeMySQL('SELECT all_prices_include_tax, default_gst_percent, federal_tax_rate FROM store_settings WHERE id = 1');
+    if (setRows && setRows.length > 0) {
+      if (setRows[0].all_prices_include_tax !== undefined && setRows[0].all_prices_include_tax !== null) {
+        isTaxInclusive = Number(setRows[0].all_prices_include_tax) === 1;
+      }
+      if (setRows[0].default_gst_percent !== undefined && setRows[0].default_gst_percent !== null && setRows[0].default_gst_percent !== '') {
+        const parsedRate = Number(setRows[0].default_gst_percent);
+        if (!isNaN(parsedRate) && parsedRate >= 0) defaultStoreGstRate = parsedRate;
+      } else if (setRows[0].federal_tax_rate && Number(setRows[0].federal_tax_rate) > 0) {
+        defaultStoreGstRate = Number(setRows[0].federal_tax_rate);
+      }
+    } else {
+      const locSet = db.prepare('SELECT all_prices_include_tax, default_gst_percent, federal_tax_rate FROM store_settings WHERE id = 1').get();
+      if (locSet) {
+        if (locSet.all_prices_include_tax !== undefined && locSet.all_prices_include_tax !== null) {
+          isTaxInclusive = Number(locSet.all_prices_include_tax) === 1;
+        }
+        if (locSet.default_gst_percent !== undefined && locSet.default_gst_percent !== null && locSet.default_gst_percent !== '') {
+          const p = Number(locSet.default_gst_percent);
+          if (!isNaN(p) && p >= 0) defaultStoreGstRate = p;
+        }
+      }
+    }
+  } catch (e) {
+    isTaxInclusive = true;
+    defaultStoreGstRate = 5;
+  }
+
   let verifiedSubtotal = 0;
+  let totalCalculatedTax = 0;
   const verifiedItems = [];
 
   for (const it of items) {
@@ -28,15 +61,15 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
       throw new Error('Quantity limit exceeded: maximum 100 units per item allowed');
     }
 
-    // 1. Fetch Product from Hostinger MySQL (or SQLite fallback)
+    // 2. Fetch Product from Hostinger MySQL (or SQLite fallback)
     let prodRows = await executeMySQL(
-      'SELECT id, title, sku, price_inr, discount_inr, stock, gst_percent, image_url, thumbnail FROM products WHERE id = ?',
+      'SELECT id, title, sku, price_inr, discount_inr, stock, gst_percent, gst_rate, image_url, thumbnail FROM products WHERE id = ?',
       [pId]
     );
 
     if (!prodRows || prodRows.length === 0) {
       try {
-        const localP = db.prepare('SELECT id, title, sku, price_inr, discount_inr, stock, image_url FROM products WHERE id = ?').get(pId);
+        const localP = db.prepare('SELECT id, title, sku, price_inr, discount_inr, stock, gst_percent, gst_rate, image_url FROM products WHERE id = ?').get(pId);
         if (localP) prodRows = [localP];
       } catch (e) {}
     }
@@ -111,6 +144,26 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     const lineTotal = Math.round(authenticUnitPrice * rawQty * 100) / 100;
     verifiedSubtotal += lineTotal;
 
+    // Determine dynamic GST rate for this specific product (from Admin Panel or fallback)
+    let itemGstRate = defaultStoreGstRate;
+    if (product.gst_percent !== null && product.gst_percent !== undefined && product.gst_percent !== '') {
+      const parsedGst = Number(product.gst_percent);
+      if (!isNaN(parsedGst) && parsedGst >= 0) itemGstRate = parsedGst;
+    } else if (product.gst_rate !== null && product.gst_rate !== undefined && product.gst_rate !== '') {
+      const parsedRate = Number(product.gst_rate);
+      if (!isNaN(parsedRate) && parsedRate >= 0) itemGstRate = parsedRate;
+    }
+
+    let itemGst = 0;
+    if (isTaxInclusive) {
+      // TAX INCLUSIVE: lineTotal already includes itemGstRate %
+      itemGst = itemGstRate > 0 ? (lineTotal * (itemGstRate / (100 + itemGstRate))) : 0;
+    } else {
+      // TAX EXCLUSIVE: lineTotal is net, itemGstRate % added on top
+      itemGst = itemGstRate > 0 ? ((lineTotal * itemGstRate) / 100) : 0;
+    }
+    totalCalculatedTax += itemGst;
+
     const itemFinalSku = varSku || prodSku;
 
     verifiedItems.push({
@@ -127,6 +180,9 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
       price_usd: Math.round((authenticUnitPrice / 83) * 100) / 100,
       quantity: rawQty,
       total: lineTotal,
+      gst_percent: itemGstRate,
+      gst_rate: itemGstRate,
+      gst_amount: Math.round(itemGst * 100) / 100,
       image_url: finalImg
     });
   }
@@ -165,38 +221,22 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     }
   }
 
-  // 4. Check Tax Mode from store_settings (TAX INCLUSIVE vs TAX EXCLUSIVE)
-  let isTaxInclusive = true;
-  try {
-    const setRows = await executeMySQL('SELECT all_prices_include_tax FROM store_settings WHERE id = 1');
-    if (setRows && setRows.length > 0 && setRows[0].all_prices_include_tax !== undefined && setRows[0].all_prices_include_tax !== null) {
-      isTaxInclusive = Number(setRows[0].all_prices_include_tax) === 1;
-    } else {
-      const locSet = db.prepare('SELECT all_prices_include_tax FROM store_settings WHERE id = 1').get();
-      if (locSet && locSet.all_prices_include_tax !== undefined && locSet.all_prices_include_tax !== null) {
-        isTaxInclusive = Number(locSet.all_prices_include_tax) === 1;
-      }
-    }
-  } catch (e) {
-    isTaxInclusive = true;
-  }
-
   const taxableAmount = Math.max(0, verifiedSubtotal - verifiedDiscount);
   // Free shipping on cart value >= ₹499
   const shippingAmount = taxableAmount >= 499 ? 0 : 50;
 
-  let gstAmount = 0;
-  let verifiedTotal = 0;
+  // Scale tax proportionally if coupon discount is applied
+  const discountRatio = verifiedSubtotal > 0 ? Math.max(0, 1 - (verifiedDiscount / verifiedSubtotal)) : 1;
+  const finalTaxAmount = Math.round(totalCalculatedTax * discountRatio * 100) / 100;
 
+  let verifiedTotal = 0;
   if (isTaxInclusive) {
-    // TAX INCLUSIVE: Product price already contains all taxes (e.g. 5% GST).
-    // Tax is extracted for GST invoice/compliance, NEVER added on top of total.
-    gstAmount = Math.round(taxableAmount - (taxableAmount / 1.05));
+    // TAX INCLUSIVE: Product price already contains all taxes (extracted for invoice/compliance).
+    // Tax is NEVER added on top of the customer's total amount.
     verifiedTotal = Math.round(taxableAmount + shippingAmount);
   } else {
-    // TAX EXCLUSIVE: Product price is net. GST (5%) is added on top at checkout.
-    gstAmount = Math.round((taxableAmount * 5) / 100);
-    verifiedTotal = Math.round(taxableAmount + gstAmount + shippingAmount);
+    // TAX EXCLUSIVE: Product price is net. GST is added on top at checkout.
+    verifiedTotal = Math.round(taxableAmount + finalTaxAmount + shippingAmount);
   }
 
   return {
@@ -205,10 +245,11 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     discountAmount: verifiedDiscount,
     couponCode: appliedCouponCode,
     taxableAmount,
-    taxAmount: gstAmount,
+    taxAmount: finalTaxAmount,
     shippingAmount,
     totalAmount: verifiedTotal,
-    isTaxInclusive
+    isTaxInclusive,
+    defaultStoreGstRate
   };
 }
 
