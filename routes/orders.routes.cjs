@@ -4,6 +4,7 @@ const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
+const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
 
 // Helper for strict 10-digit Indian phone normalization
 function sanitize10DigitPhone(raw) {
@@ -433,22 +434,31 @@ router.post('/api/orders', async (req, res) => {
     // Send confirmation email ONLY for Cash on Delivery (COD) orders immediately on creation.
     // For online payments (Razorpay), confirmation email will be dispatched strictly upon verified payment!
     if (effectivePaymentMode === 'COD' && rawEmail) {
-      sendEmailNotification(
-        rawEmail,
-        `Order Confirmed #${orderNumber} | ValueLife Essentials`,
-        `<div style="font-family: Arial, sans-serif; padding: 25px; color: #164e3f; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px;">
-          <h2 style="color: #164e3f; margin-bottom: 8px;">Thank you for your order, ${rawName}!</h2>
-          <p style="color: #475569; font-size: 14px;">Your Cash on Delivery (COD) order <b>#${orderNumber}</b> has been received and is being prepared with 100% certified organic care.</p>
-          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 15px; margin: 20px 0;">
-            <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> ${orderNumber}</p>
-            <p style="margin: 4px 0; font-size: 14px;"><b>Total Amount:</b> ₹${totalAmount.toLocaleString('en-IN')}</p>
-            <p style="margin: 4px 0; font-size: 14px;"><b>Payment Mode:</b> Cash on Delivery (COD)</p>
-            <p style="margin: 4px 0; font-size: 14px; color: #b45309;"><b>Cash to Pay on Delivery:</b> ₹${totalAmount.toLocaleString('en-IN')}</p>
-            <p style="margin: 4px 0; font-size: 14px;"><b>Delivery Address:</b> ${rawAddress}</p>
-          </div>
-          <p style="font-size: 12px; color: #94a3b8;">You can track real-time shipment updates anytime by signing into your ValueLife account.</p>
-        </div>`
-      ).catch(() => {});
+      try {
+        const emailHtml = buildOrderConfirmationEmailHtml({
+          orderNumber,
+          customerName: rawName,
+          paymentMode: 'COD',
+          paymentStatus: 'PENDING',
+          totalAmount,
+          paidAmount,
+          remainingAmount,
+          subtotal,
+          discountAmount: discount,
+          shippingAmount,
+          taxAmount,
+          shippingAddress: rawAddress,
+          items: orderItems
+        });
+
+        sendEmailNotification(
+          rawEmail,
+          `Order Confirmed #${orderNumber} | ValueLife Essentials`,
+          emailHtml
+        ).catch((e) => console.warn('Order confirmation email warn:', e.message));
+      } catch (emErr) {
+        console.warn('Failed to build confirmation email:', emErr.message);
+      }
     }
 
     res.json({
