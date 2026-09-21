@@ -10,23 +10,39 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     throw new Error('Order must contain at least one valid item');
   }
 
-  // 1. Fetch Store Tax Settings (Mode & Default GST Rate)
+  // 1. Fetch Store Tax & Shipping Settings
   let isTaxInclusive = true;
   let defaultStoreGstRate = 5;
+  let storeShippingFee = 50;
+  let storeFreeShippingThreshold = 499;
+  let enableFreeShipping = 1;
+
   try {
-    const setRows = await executeMySQL('SELECT all_prices_include_tax, default_gst_percent, federal_tax_rate FROM store_settings WHERE id = 1');
+    const setRows = await executeMySQL('SELECT all_prices_include_tax, default_gst_percent, federal_tax_rate, shipping_fee, free_shipping_threshold, enable_free_shipping FROM store_settings WHERE id = 1');
     if (setRows && setRows.length > 0) {
-      if (setRows[0].all_prices_include_tax !== undefined && setRows[0].all_prices_include_tax !== null) {
-        isTaxInclusive = Number(setRows[0].all_prices_include_tax) === 1;
+      const s = setRows[0];
+      if (s.all_prices_include_tax !== undefined && s.all_prices_include_tax !== null) {
+        isTaxInclusive = Number(s.all_prices_include_tax) === 1;
       }
-      if (setRows[0].default_gst_percent !== undefined && setRows[0].default_gst_percent !== null && setRows[0].default_gst_percent !== '') {
-        const parsedRate = Number(setRows[0].default_gst_percent);
+      if (s.default_gst_percent !== undefined && s.default_gst_percent !== null && s.default_gst_percent !== '') {
+        const parsedRate = Number(s.default_gst_percent);
         if (!isNaN(parsedRate) && parsedRate >= 0) defaultStoreGstRate = parsedRate;
-      } else if (setRows[0].federal_tax_rate && Number(setRows[0].federal_tax_rate) > 0) {
-        defaultStoreGstRate = Number(setRows[0].federal_tax_rate);
+      } else if (s.federal_tax_rate && Number(s.federal_tax_rate) > 0) {
+        defaultStoreGstRate = Number(s.federal_tax_rate);
+      }
+      if (s.shipping_fee !== undefined && s.shipping_fee !== null && s.shipping_fee !== '') {
+        const fee = Number(s.shipping_fee);
+        if (!isNaN(fee) && fee >= 0) storeShippingFee = fee;
+      }
+      if (s.free_shipping_threshold !== undefined && s.free_shipping_threshold !== null && s.free_shipping_threshold !== '') {
+        const thresh = Number(s.free_shipping_threshold);
+        if (!isNaN(thresh) && thresh >= 0) storeFreeShippingThreshold = thresh;
+      }
+      if (s.enable_free_shipping !== undefined && s.enable_free_shipping !== null) {
+        enableFreeShipping = Number(s.enable_free_shipping);
       }
     } else {
-      const locSet = db.prepare('SELECT all_prices_include_tax, default_gst_percent, federal_tax_rate FROM store_settings WHERE id = 1').get();
+      const locSet = db.prepare('SELECT all_prices_include_tax, default_gst_percent, federal_tax_rate, shipping_fee, free_shipping_threshold, enable_free_shipping FROM store_settings WHERE id = 1').get();
       if (locSet) {
         if (locSet.all_prices_include_tax !== undefined && locSet.all_prices_include_tax !== null) {
           isTaxInclusive = Number(locSet.all_prices_include_tax) === 1;
@@ -35,11 +51,25 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
           const p = Number(locSet.default_gst_percent);
           if (!isNaN(p) && p >= 0) defaultStoreGstRate = p;
         }
+        if (locSet.shipping_fee !== undefined && locSet.shipping_fee !== null) {
+          const fee = Number(locSet.shipping_fee);
+          if (!isNaN(fee) && fee >= 0) storeShippingFee = fee;
+        }
+        if (locSet.free_shipping_threshold !== undefined && locSet.free_shipping_threshold !== null) {
+          const thresh = Number(locSet.free_shipping_threshold);
+          if (!isNaN(thresh) && thresh >= 0) storeFreeShippingThreshold = thresh;
+        }
+        if (locSet.enable_free_shipping !== undefined && locSet.enable_free_shipping !== null) {
+          enableFreeShipping = Number(locSet.enable_free_shipping);
+        }
       }
     }
   } catch (e) {
     isTaxInclusive = true;
     defaultStoreGstRate = 5;
+    storeShippingFee = 50;
+    storeFreeShippingThreshold = 499;
+    enableFreeShipping = 1;
   }
 
   let verifiedSubtotal = 0;
@@ -222,8 +252,9 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
   }
 
   const taxableAmount = Math.max(0, verifiedSubtotal - verifiedDiscount);
-  // Free shipping on cart value >= ₹499
-  const shippingAmount = taxableAmount >= 499 ? 0 : 50;
+  // Dynamic Shipping Charge calculation based on Admin settings & limitation threshold
+  const isFreeShippingApplicable = enableFreeShipping === 1 && taxableAmount >= storeFreeShippingThreshold;
+  const shippingAmount = isFreeShippingApplicable ? 0 : storeShippingFee;
 
   // Scale tax proportionally if coupon discount is applied
   const discountRatio = verifiedSubtotal > 0 ? Math.max(0, 1 - (verifiedDiscount / verifiedSubtotal)) : 1;
@@ -249,7 +280,10 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     shippingAmount,
     totalAmount: verifiedTotal,
     isTaxInclusive,
-    defaultStoreGstRate
+    defaultStoreGstRate,
+    shippingFee: storeShippingFee,
+    freeShippingThreshold: storeFreeShippingThreshold,
+    isFreeShipping: isFreeShippingApplicable
   };
 }
 
