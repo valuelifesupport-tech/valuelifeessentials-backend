@@ -289,6 +289,14 @@ function initDb(db) {
         'Privacy Policy - OrganicBazar Data Protection',
         'OrganicBazar strict privacy policy and 256-bit SSL customer data protection guarantee.',
         'PUBLISHED'
+      ),
+      (
+        'Cancellation & Refund Policy',
+        'refund-policy',
+        '# Cancellation & Refund Policy\n\n### 1. Cancellation Policy\n- **Cash on Delivery (COD)**: You can cancel a Cash on Delivery order before the shipment is generated. If not shipped, the order will be automatically cancelled after 7 days.\n- **Prepaid Orders**: Cannot be cancelled directly from your side. Contact Value Life Essentials before shipment is generated, within 48 hours.\n\n### 2. International Orders\n- Any exchange or return shall not be entertained for goods delivered outside India.\n\n### 3. Domestic Returns & Exchanges (Within India)\n- Inform us within 3 days of delivery with reasons.\n- Eligible reasons: Defective product, wrong product sent, or mismatched item.\n- **Mandatory 360-degree unboxing video proof** is required.\n- Customer bears return shipping charges.\n\n### 4. Refund Timeline\n- Approved refunds are processed via online payment mode within 10-15 working days.',
+        'Cancellation & Refund Policy - Value Life Essentials',
+        'Read Value Life Essentials comprehensive cancellation, return, and refund policy.',
+        'PUBLISHED'
       );
     `);
   }
