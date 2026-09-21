@@ -81,8 +81,13 @@ router.get('/api/products', async (req, res) => {
       const pImages = images.filter(img => img.product_id === p.id).map(img => img.image_url);
       const pVariants = variants.filter(v => v.product_id === p.id);
       const primaryImg = p.image_url || (pImages.length > 0 ? pImages[0] : null);
+      const effectiveGst = (p.gst_percent !== null && p.gst_percent !== undefined && p.gst_percent !== '')
+        ? Number(p.gst_percent)
+        : ((p.gst_rate !== null && p.gst_rate !== undefined && p.gst_rate !== '') ? Number(p.gst_rate) : null);
       return {
         ...p,
+        gst_percent: effectiveGst,
+        gst_rate: effectiveGst,
         images: pImages.length > 0 ? pImages : (primaryImg ? [primaryImg] : []),
         image_url: primaryImg,
         thumbnail: p.thumbnail || primaryImg,
@@ -130,6 +135,12 @@ router.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res)
     prod.review_count = normalizedReviews.length;
     prod.rating = normalizedReviews.length > 0 ? (normalizedReviews.reduce((s, r) => s + (Number(r.rating) || 5), 0) / normalizedReviews.length) : 5.0;
 
+    const effectiveSlugGst = (prod.gst_percent !== null && prod.gst_percent !== undefined && prod.gst_percent !== '')
+      ? Number(prod.gst_percent)
+      : ((prod.gst_rate !== null && prod.gst_rate !== undefined && prod.gst_rate !== '') ? Number(prod.gst_rate) : null);
+    prod.gst_percent = effectiveSlugGst;
+    prod.gst_rate = effectiveSlugGst;
+
     res.json(prod);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -165,7 +176,8 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
     const cost_per_item_inr = req.body.cost_per_item_inr != null ? Number(req.body.cost_per_item_inr) : (req.body.cost_price != null ? Number(req.body.cost_price) : null);
     const cost_per_item_usd = req.body.cost_per_item_usd != null ? Number(req.body.cost_per_item_usd) : (cost_per_item_inr ? Math.round(cost_per_item_inr / 83 * 100) / 100 : null);
     const stock = req.body.stock != null ? Number(req.body.stock) : (req.body.stock_quantity != null ? Number(req.body.stock_quantity) : 100);
-    const gst_percent = req.body.gst_percent != null ? Number(req.body.gst_percent) : (req.body.tax_rate != null ? Number(req.body.tax_rate) : 5);
+    const rawGst = req.body.gst_percent !== undefined ? req.body.gst_percent : req.body.tax_rate;
+    const gst_percent = (rawGst !== undefined && rawGst !== null && rawGst !== '' && !isNaN(Number(rawGst))) ? Number(rawGst) : null;
     const hs_code = req.body.hs_code || req.body.hsn_code || '';
 
     if (!title || price_inr === undefined) {
@@ -191,14 +203,14 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
         title, slug, description, price_inr, price_usd,
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         sku, category_id, subcategory_id, stock, image_url,
-        is_best_product, gst_percent, hs_code,
+        is_best_product, gst_percent, gst_rate, hs_code,
         vendor, product_type, tags, weight, country_of_origin, barcode, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
       [
         title, finalSlug, description || '', price_inr, price_usd,
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         productSku, category_id || null, subcategory_id || null, stock, primaryImage,
-        is_best_product ? 1 : 0, gst_percent, hs_code,
+        is_best_product ? 1 : 0, gst_percent, gst_percent, hs_code,
         vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null
       ]
     );
@@ -210,13 +222,13 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
         id, title, slug, description, price_inr, price_usd,
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         sku, category_id, subcategory_id, stock, image_url,
-        is_best_product, hs_code,
+        is_best_product, gst_percent, gst_rate, hs_code,
         vendor, product_type, tags, weight, country_of_origin, barcode, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`).run(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`).run(
         newId, title, finalSlug, description || '', price_inr, price_usd,
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         productSku, category_id || null, subcategory_id || null, stock, primaryImage,
-        is_best_product ? 1 : 0, hs_code,
+        is_best_product ? 1 : 0, gst_percent, gst_percent, hs_code,
         vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null
       );
     } catch (e) {}
@@ -276,7 +288,12 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
     const cost_per_item_inr = req.body.cost_per_item_inr != null ? Number(req.body.cost_per_item_inr) : (req.body.cost_price != null ? Number(req.body.cost_price) : undefined);
     const cost_per_item_usd = req.body.cost_per_item_usd != null ? Number(req.body.cost_per_item_usd) : (cost_per_item_inr != null ? Math.round(cost_per_item_inr / 83 * 100) / 100 : undefined);
     const stock = req.body.stock != null ? Number(req.body.stock) : (req.body.stock_quantity != null ? Number(req.body.stock_quantity) : undefined);
-    const gst_percent = req.body.gst_percent != null ? Number(req.body.gst_percent) : (req.body.tax_rate != null ? Number(req.body.tax_rate) : undefined);
+    const hasGstField = (req.body.gst_percent !== undefined) || (req.body.tax_rate !== undefined);
+    let resolvedGst = null;
+    if (hasGstField) {
+      const gVal = req.body.gst_percent !== undefined ? req.body.gst_percent : req.body.tax_rate;
+      resolvedGst = (gVal !== null && gVal !== '' && !isNaN(Number(gVal))) ? Number(gVal) : null;
+    }
     const hs_code = req.body.hs_code || req.body.hsn_code || undefined;
 
     const primaryImage = (images && images.length > 0) ? images[0] : (req.body.image_url || undefined);
@@ -295,7 +312,10 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
         cost_per_item_inr = COALESCE(?, cost_per_item_inr), cost_per_item_usd = COALESCE(?, cost_per_item_usd),
         sku = COALESCE(?, sku), category_id = COALESCE(?, category_id), subcategory_id = COALESCE(?, subcategory_id),
         stock = COALESCE(?, stock), image_url = COALESCE(?, image_url),
-        is_best_product = COALESCE(?, is_best_product), gst_percent = COALESCE(?, gst_percent), hs_code = COALESCE(?, hs_code),
+        is_best_product = COALESCE(?, is_best_product),
+        gst_percent = CASE WHEN ? = 1 THEN ? ELSE gst_percent END,
+        gst_rate = CASE WHEN ? = 1 THEN ? ELSE gst_rate END,
+        hs_code = COALESCE(?, hs_code),
         vendor = COALESCE(?, vendor), product_type = COALESCE(?, product_type), tags = COALESCE(?, tags),
         weight = COALESCE(?, weight), country_of_origin = COALESCE(?, country_of_origin)
       WHERE id = ?`,
@@ -306,7 +326,10 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
         cost_per_item_inr, cost_per_item_usd,
         sku, category_id, subcategory_id,
         stock, primaryImage,
-        is_best_product !== undefined ? (is_best_product ? 1 : 0) : null, gst_percent, hs_code,
+        is_best_product !== undefined ? (is_best_product ? 1 : 0) : null,
+        hasGstField ? 1 : 0, resolvedGst,
+        hasGstField ? 1 : 0, resolvedGst,
+        hs_code,
         vendor, product_type, tags,
         weight ? Number(weight) : null, country_of_origin, id
       ]
