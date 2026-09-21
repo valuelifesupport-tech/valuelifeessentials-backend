@@ -30,13 +30,13 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
 
     // 1. Fetch Product from Hostinger MySQL (or SQLite fallback)
     let prodRows = await executeMySQL(
-      'SELECT id, title, price_inr, discount_inr, stock, gst_percent, image_url, thumbnail FROM products WHERE id = ?',
+      'SELECT id, title, sku, price_inr, discount_inr, stock, gst_percent, image_url, thumbnail FROM products WHERE id = ?',
       [pId]
     );
 
     if (!prodRows || prodRows.length === 0) {
       try {
-        const localP = db.prepare('SELECT id, title, price_inr, discount_inr, stock, image_url FROM products WHERE id = ?').get(pId);
+        const localP = db.prepare('SELECT id, title, sku, price_inr, discount_inr, stock, image_url FROM products WHERE id = ?').get(pId);
         if (localP) prodRows = [localP];
       } catch (e) {}
     }
@@ -48,6 +48,8 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     const product = prodRows[0];
     let finalTitle = product.title || 'ValueLife Organic Product';
     let finalImg = product.image_url || product.thumbnail || it.image_url || '';
+    const prodSku = (product.sku || '').trim() || `VL-${product.id}`;
+    let varSku = null;
 
     // Authentic product unit price from database (prefer discount price if available)
     const pDiscount = Number(product.discount_inr);
@@ -62,21 +64,30 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
       let vRows = [];
       if (vId) {
         vRows = await executeMySQL(
-          'SELECT id, product_id, title, variant_name, price_inr, discount_inr, stock, image_url FROM product_variants WHERE id = ? AND product_id = ?',
+          'SELECT id, product_id, title, variant_name, sku, price_inr, discount_inr, stock, image_url FROM product_variants WHERE id = ? AND product_id = ?',
           [vId, pId]
         );
       }
       if ((!vRows || vRows.length === 0) && vName) {
         vRows = await executeMySQL(
-          'SELECT id, product_id, title, variant_name, price_inr, discount_inr, stock, image_url FROM product_variants WHERE product_id = ? AND (LOWER(variant_name) = LOWER(?) OR LOWER(title) = LOWER(?)) LIMIT 1',
+          'SELECT id, product_id, title, variant_name, sku, price_inr, discount_inr, stock, image_url FROM product_variants WHERE product_id = ? AND (LOWER(variant_name) = LOWER(?) OR LOWER(title) = LOWER(?)) LIMIT 1',
           [pId, vName, vName]
         );
+      }
+      if ((!vRows || vRows.length === 0)) {
+        try {
+          if (vId) {
+            const locV = db.prepare('SELECT id, product_id, title, variant_name, sku, price_inr, discount_inr, stock, image_url FROM product_variants WHERE id = ?').get(vId);
+            if (locV) vRows = [locV];
+          }
+        } catch (e) {}
       }
 
       if (vRows && vRows.length > 0) {
         const variant = vRows[0];
         vId = variant.id;
         vName = variant.variant_name || variant.title || vName;
+        varSku = (variant.sku || '').trim() || (vId ? `${prodSku}-VAR-${vId}` : null);
 
         const vDiscount = Number(variant.discount_inr);
         const vRegular = Number(variant.price_inr);
@@ -100,12 +111,17 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     const lineTotal = Math.round(authenticUnitPrice * rawQty * 100) / 100;
     verifiedSubtotal += lineTotal;
 
+    const itemFinalSku = varSku || prodSku;
+
     verifiedItems.push({
       product_id: product.id,
       variant_id: vId,
       product_title: finalTitle,
       product_name: finalTitle,
       variant_name: vName || null,
+      sku: itemFinalSku,
+      product_sku: prodSku,
+      variant_sku: varSku,
       price: authenticUnitPrice,
       price_inr: authenticUnitPrice,
       price_usd: Math.round((authenticUnitPrice / 83) * 100) / 100,
