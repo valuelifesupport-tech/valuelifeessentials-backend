@@ -412,6 +412,9 @@ function initDb(db) {
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN legal_business_name TEXT DEFAULT 'OrganicBazar Retail Private Limited'`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN all_prices_include_tax INTEGER DEFAULT 1`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN federal_tax_rate REAL DEFAULT 0.0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN shipping_fee REAL DEFAULT 50.0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN free_shipping_threshold REAL DEFAULT 499.0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN enable_free_shipping INTEGER DEFAULT 1`); } catch (e) {}
 
   try { db.exec(`ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 5.0`); } catch (e) {}
 
