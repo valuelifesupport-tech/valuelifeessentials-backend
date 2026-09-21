@@ -6,6 +6,7 @@ const { executeMySQL, db } = require('../config/database.cjs');
 const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require('../config/constants.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
+const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
 const {
   initiatePaymentTransaction,
   recordGatewayHandshake,
@@ -352,23 +353,38 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
 
         // DISPATCH OFFICIAL ORDER CONFIRMATION EMAIL UPON SUCCESSFUL PAYMENT
         if (ord.customer_email && !wasAlreadyPaid) {
-          sendEmailNotification(
-            ord.customer_email,
-            `Order Confirmed #${ord.order_number} | ValueLife Essentials`,
-            `<div style="font-family: Arial, sans-serif; padding: 25px; color: #164e3f; max-width: 600px; margin: 0 auto; border: 1px solid #bbf7d0; border-radius: 12px; background: #ffffff;">
-              <h2 style="color: #164e3f; margin-bottom: 8px;">Thank you for your order, ${ord.customer_name || 'Valued Customer'}!</h2>
-              <p style="color: #475569; font-size: 14px;">Your payment has been successfully received via <b>Razorpay</b> and your order <b>#${ord.order_number}</b> is confirmed and being prepared for shipment.</p>
-              <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 15px; margin: 20px 0;">
-                <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> #${ord.order_number}</p>
-                <p style="margin: 4px 0; font-size: 14px;"><b>Payment Status:</b> <span style="color: #16a34a; font-weight: bold;">${newPayStatus === 'PARTIAL_PAID' ? 'Partial Deposit Paid (Online via Razorpay)' : 'Paid in Full (Online via Razorpay)'}</span></p>
-                <p style="margin: 4px 0; font-size: 14px;"><b>Amount Paid Online:</b> ₹${newPaidAmount.toLocaleString('en-IN')}</p>
-                ${newRemainingAmount > 0 ? `<p style="margin: 4px 0; font-size: 14px; color: #b45309;"><b>COD Balance on Delivery:</b> ₹${newRemainingAmount.toLocaleString('en-IN')}</p>` : ''}
-                <p style="margin: 4px 0; font-size: 14px;"><b>Total Order Value:</b> ₹${Number(ord.total_amount).toLocaleString('en-IN')}</p>
-                <p style="margin: 4px 0; font-size: 14px;"><b>Delivery Address:</b> ${ord.shipping_address || 'Provided at checkout'}</p>
-              </div>
-              <p style="font-size: 12px; color: #94a3b8;">You can track real-time shipment updates anytime by signing into your ValueLife account.</p>
-            </div>`
-          ).catch(e => console.warn('Payment verify email warn:', e.message));
+          try {
+            let orderItems = [];
+            try {
+              orderItems = typeof ord.items_json === 'string' ? JSON.parse(ord.items_json) : (ord.items_json || []);
+            } catch (e) {
+              orderItems = [];
+            }
+
+            const emailHtml = buildOrderConfirmationEmailHtml({
+              orderNumber: ord.order_number,
+              customerName: ord.customer_name || 'Valued Customer',
+              paymentMode: ord.payment_mode || 'ONLINE',
+              paymentStatus: newPayStatus,
+              totalAmount: Number(ord.total_amount || 0),
+              paidAmount: newPaidAmount,
+              remainingAmount: newRemainingAmount,
+              subtotal: Number(ord.subtotal || 0),
+              discountAmount: Number(ord.discount_amount || 0),
+              shippingAmount: Number(ord.shipping_amount || 0),
+              taxAmount: Number(ord.tax_amount || 0),
+              shippingAddress: ord.shipping_address || 'Provided at checkout',
+              items: orderItems
+            });
+
+            sendEmailNotification(
+              ord.customer_email,
+              `Order Confirmed #${ord.order_number} | ValueLife Essentials`,
+              emailHtml
+            ).catch(e => console.warn('Payment verify email warn:', e.message));
+          } catch (emErr) {
+            console.warn('Payment confirmation email build error:', emErr.message);
+          }
         }
       }
     }
