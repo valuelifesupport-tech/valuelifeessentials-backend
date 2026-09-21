@@ -27,7 +27,7 @@ router.get('/api/pages/:slug', async (req, res) => {
     let slug = (req.params.slug || '').trim().toLowerCase();
     if (slug === 'contact') slug = 'contact-us';
     if (slug === 'about') slug = 'about-us';
-    if (slug === 'returns-refund') slug = 'refund-policy';
+    if (slug === 'returns-refund' || slug === 'cancellation-policy' || slug === 'cancellation-and-refund' || slug === 'cancellation-and-refund-policy') slug = 'refund-policy';
 
     let pageData = null;
     let page = await executeMySQL('SELECT * FROM custom_pages WHERE slug = ?', [slug]);
@@ -95,14 +95,145 @@ router.get('/api/pages/:slug', async (req, res) => {
 </ul>`
       },
       'refund-policy': {
-        title: 'Refund & Return Policy',
-        content: `<h2>Hassle-Free 7-Day Return & Replacement Policy</h2>
-<p>At ValueLife Essentials, customer satisfaction is our top priority. If you receive a damaged, leaked, expired, or incorrect product, we provide an immediate replacement or 100% refund.</p>
-<ul>
-  <li><strong>Window:</strong> Report issues within 7 days of package delivery.</li>
-  <li><strong>Support:</strong> Simply WhatsApp us at <a href="https://wa.me/917675941899">+91 76759 41899</a> or email <a href="mailto:valuelifesupport@gmail.com">valuelifesupport@gmail.com</a> with photos of the damaged item.</li>
-  <li><strong>Processing:</strong> Refunds are credited to the original payment source within 3–5 banking business days.</li>
-</ul>`
+        title: 'Cancellation & Refund Policy',
+        content: `<div class="space-y-8">
+  <div class="bg-emerald-50 border border-emerald-200/80 rounded-2xl p-5 text-emerald-950 text-sm">
+    <p class="font-medium">
+      Welcome to <strong>Value Life Essentials</strong>. We take immense pride in delivering pure, authentic, and premium wellness products. Please review our comprehensive <strong>Cancellation, Return, and Refund Policy</strong> outlined below prior to placing orders on our website.
+    </p>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+    <h2 class="text-xl font-extrabold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3 font-['Outfit']">
+      <span>📦</span> 1. Cancellation Policy
+    </h2>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
+        <h3 class="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+          <span>💵</span> Cash on Delivery (COD) Orders
+        </h3>
+        <ul class="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
+          <li>You can cancel a Cash on Delivery order <strong>before the shipment is generated</strong>.</li>
+          <li>Once the shipment has been generated, the order <strong>cannot be cancelled</strong> from your side.</li>
+          <li>If the product is not shipped, the order will be <strong>automatically cancelled after 7 days</strong> from the date the order was placed.</li>
+        </ul>
+      </div>
+
+      <div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
+        <h3 class="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+          <span>💳</span> Prepaid Orders
+        </h3>
+        <ul class="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
+          <li>Prepaid orders <strong>cannot be cancelled directly</strong> from your side.</li>
+          <li>If you wish to cancel a prepaid order, please contact <strong>Value Life Essentials before the shipment is generated</strong>, normally within <strong>48 hours</strong> of placing the order.</li>
+          <li>Once the product has been shipped, it <strong>cannot be cancelled</strong>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="bg-emerald-900/5 border border-emerald-600/20 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div class="text-slate-700">
+        <span class="font-bold text-slate-900">Need cancellation assistance?</span> Contact our customer support:
+      </div>
+      <div class="flex items-center gap-3 font-bold text-emerald-800">
+        <span>📞 +91 76759 41899 / +91 78931 00755</span>
+        <span>✉️ valuelifesupport@gmail.com</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+      <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2 border-b pb-2 font-['Outfit']">
+        <span>🌐</span> International Returns & Exchanges
+      </h3>
+      <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900">
+        <strong>Important Notice:</strong> Any exchange or return shall <strong>not be entertained</strong> for goods delivered outside India.
+      </div>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+      <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2 border-b pb-2 font-['Outfit']">
+        <span>🇮🇳</span> Exchange & Return Policy (Goods Delivered Within India)
+      </h3>
+      <ul class="text-xs text-slate-600 space-y-2 list-disc pl-4">
+        <li>If you wish to request a return or exchange, you must inform us within <strong>3 days from the date of delivery</strong>, along with the reason for the return or exchange.</li>
+        <li>Once the return or exchange request is approved, the customer will be required to send the product back to the address provided by Value Life Essentials in its <strong>original condition</strong>.</li>
+        <li><strong>Return Shipping:</strong> The return shipping charges and any additional charges required to make the goods available at our location shall be borne by the customer.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+    <h2 class="text-xl font-extrabold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3 font-['Outfit']">
+      <span>✅</span> Eligible Reasons for Return or Exchange
+    </h2>
+
+    <p class="text-xs text-slate-600">Returns or exchanges will only be entertained in the following cases:</p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl text-xs space-y-1">
+        <span class="font-extrabold text-emerald-950 block">1. Defective Product</span>
+        <p class="text-slate-600">The product received is physically defective or damaged.</p>
+      </div>
+      <div class="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl text-xs space-y-1">
+        <span class="font-extrabold text-emerald-950 block">2. Wrong Product Sent</span>
+        <p class="text-slate-600">The wrong product was dispatched by our team.</p>
+      </div>
+      <div class="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl text-xs space-y-1">
+        <span class="font-extrabold text-emerald-950 block">3. Mismatched Item</span>
+        <p class="text-slate-600">A different product was received than the one ordered.</p>
+      </div>
+    </div>
+
+    <div class="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-xs space-y-2 text-amber-950">
+      <div class="flex items-center gap-2 font-bold text-amber-900 text-sm">
+        <span>📹</span> Mandatory 360-Degree Unboxing Video Proof Required
+      </div>
+      <p class="leading-relaxed">
+        For any claim related to a defective or wrong product, a <strong>complete 360-degree unboxing video</strong> is strictly required as proof (showing parcel label and opening).
+      </p>
+      <p class="text-[11px] text-amber-800 italic pt-1 border-t border-amber-200">
+        * Please note that minor issues such as loose threads, minor misprints, smudges, or minor stains will not be considered as damage or a manufacturing defect.
+      </p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-2">
+      <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2 border-b pb-2 font-['Outfit']">
+        <span>🔍</span> Return / Refund Approval
+      </h3>
+      <p class="text-xs text-slate-600 leading-relaxed">
+        After receiving and inspecting the returned product, the customer will be notified regarding the approval of the exchange or refund.
+      </p>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-2">
+      <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2 border-b pb-2 font-['Outfit']">
+        <span>💳</span> Refund Policy
+      </h3>
+      <p class="text-xs text-slate-600 leading-relaxed">
+        If a refund is approved, it will be processed through the <strong>online payment mode</strong> within <strong>10-15 working days</strong> from the date of refund approval.
+      </p>
+    </div>
+  </div>
+
+  <div class="bg-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-wrap justify-between items-center gap-4">
+    <div>
+      <h3 class="font-extrabold text-base font-['Outfit'] flex items-center gap-2">
+        <span>🤝</span> Value Life Essentials Customer Support
+      </h3>
+      <p class="text-xs text-slate-400 mt-1">Dedicated customer satisfaction and assistance.</p>
+    </div>
+    <div class="text-xs text-left sm:text-right space-y-1">
+      <div class="font-bold text-emerald-400">📞 +91 76759 41899 / +91 78931 00755</div>
+      <div class="text-slate-300">✉️ valuelifesupport@gmail.com</div>
+      <div class="text-[10px] text-slate-500">Mon - Sat: 9:00 AM - 7:00 PM IST</div>
+    </div>
+  </div>
+</div>`
       },
       'faq': {
         title: 'Frequently Asked Questions (FAQ)',
