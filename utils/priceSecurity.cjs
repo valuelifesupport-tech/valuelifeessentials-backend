@@ -165,12 +165,39 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     }
   }
 
+  // 4. Check Tax Mode from store_settings (TAX INCLUSIVE vs TAX EXCLUSIVE)
+  let isTaxInclusive = true;
+  try {
+    const setRows = await executeMySQL('SELECT all_prices_include_tax FROM store_settings WHERE id = 1');
+    if (setRows && setRows.length > 0 && setRows[0].all_prices_include_tax !== undefined && setRows[0].all_prices_include_tax !== null) {
+      isTaxInclusive = Number(setRows[0].all_prices_include_tax) === 1;
+    } else {
+      const locSet = db.prepare('SELECT all_prices_include_tax FROM store_settings WHERE id = 1').get();
+      if (locSet && locSet.all_prices_include_tax !== undefined && locSet.all_prices_include_tax !== null) {
+        isTaxInclusive = Number(locSet.all_prices_include_tax) === 1;
+      }
+    }
+  } catch (e) {
+    isTaxInclusive = true;
+  }
+
   const taxableAmount = Math.max(0, verifiedSubtotal - verifiedDiscount);
-  // Standard GST 5%
-  const gstAmount = Math.round((taxableAmount * 5) / 100);
   // Free shipping on cart value >= ₹499
   const shippingAmount = taxableAmount >= 499 ? 0 : 50;
-  const verifiedTotal = Math.round(taxableAmount + gstAmount + shippingAmount);
+
+  let gstAmount = 0;
+  let verifiedTotal = 0;
+
+  if (isTaxInclusive) {
+    // TAX INCLUSIVE: Product price already contains all taxes (e.g. 5% GST).
+    // Tax is extracted for GST invoice/compliance, NEVER added on top of total.
+    gstAmount = Math.round(taxableAmount - (taxableAmount / 1.05));
+    verifiedTotal = Math.round(taxableAmount + shippingAmount);
+  } else {
+    // TAX EXCLUSIVE: Product price is net. GST (5%) is added on top at checkout.
+    gstAmount = Math.round((taxableAmount * 5) / 100);
+    verifiedTotal = Math.round(taxableAmount + gstAmount + shippingAmount);
+  }
 
   return {
     verifiedItems,
@@ -180,7 +207,8 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     taxableAmount,
     taxAmount: gstAmount,
     shippingAmount,
-    totalAmount: verifiedTotal
+    totalAmount: verifiedTotal,
+    isTaxInclusive
   };
 }
 
