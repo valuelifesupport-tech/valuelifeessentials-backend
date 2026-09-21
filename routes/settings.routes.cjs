@@ -12,7 +12,8 @@ const ALLOWED_SETTINGS_COLS = new Set([
   'address_line1', 'address_line2', 'city', 'state', 'country', 'pincode',
   'instagram_url', 'facebook_url', 'twitter_url', 'youtube_url', 'whatsapp_number',
   'google_analytics_id', 'meta_pixel_id', 'maintenance_mode', 'maintenance_password',
-  'default_gst_percent', 'gst_type', 'all_prices_include_tax', 'store_state', 'legal_business_name', 'federal_tax_rate'
+  'default_gst_percent', 'gst_type', 'all_prices_include_tax', 'store_state', 'legal_business_name', 'federal_tax_rate',
+  'enable_free_shipping'
 ]);
 const ALLOWED_HERO_COLS = new Set([
   'headline', 'subheadline', 'badge_text', 'primary_cta_text', 'primary_cta_link',
