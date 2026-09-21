@@ -17,40 +17,88 @@ function sanitize10DigitPhone(raw) {
   return digits.slice(-10);
 }
 
-// Helper to attach items to an array of orders or single order
+// Helper to attach items to an array of orders or single order and ensure SKUs are populated
 async function enrichOrdersWithItems(orders) {
   if (!orders || orders.length === 0) return [];
   const orderList = Array.isArray(orders) ? orders : [orders];
   for (const ord of orderList) {
     if (!ord) continue;
-    if (ord.items && Array.isArray(ord.items) && ord.items.length > 0) continue;
-
-    // Check items_json column first
-    if (ord.items_json) {
-      try {
-        const parsed = typeof ord.items_json === 'string' ? JSON.parse(ord.items_json) : ord.items_json;
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          ord.items = parsed;
-          continue;
-        }
-      } catch (e) {}
-    }
-
-    // Query order_items table
-    try {
-      let items = await executeMySQL(
-        'SELECT id, order_id, product_id, COALESCE(product_title, product_name) as product_title, COALESCE(product_name, product_title) as product_name, variant_id, variant_name, COALESCE(price_inr, price) as price, COALESCE(price_inr, price) as price_inr, quantity, COALESCE(total, price * quantity) as total, image_url FROM order_items WHERE order_id = ?',
-        [ord.id]
-      );
-      if (!items || items.length === 0) {
+    let items = ord.items;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      // Check items_json column first
+      if (ord.items_json) {
         try {
-          items = db.prepare('SELECT id, order_id, product_id, product_name, variant_id, variant_name, price, quantity, total FROM order_items WHERE order_id = ?').all(ord.id);
+          const parsed = typeof ord.items_json === 'string' ? JSON.parse(ord.items_json) : ord.items_json;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            items = parsed;
+          }
         } catch (e) {}
       }
-      ord.items = items || [];
-    } catch (e) {
-      ord.items = [];
+
+      // Query order_items table if items_json wasn't available
+      if (!items || items.length === 0) {
+        try {
+          items = await executeMySQL(
+            'SELECT id, order_id, product_id, COALESCE(product_title, product_name) as product_title, COALESCE(product_name, product_title) as product_name, variant_id, variant_name, COALESCE(price_inr, price) as price, COALESCE(price_inr, price) as price_inr, quantity, COALESCE(total, price * quantity) as total, image_url FROM order_items WHERE order_id = ?',
+            [ord.id]
+          );
+          if (!items || items.length === 0) {
+            try {
+              items = db.prepare('SELECT id, order_id, product_id, product_name, variant_id, variant_name, price, quantity, total FROM order_items WHERE order_id = ?').all(ord.id);
+            } catch (e) {}
+          }
+        } catch (e) {
+          items = [];
+        }
+      }
     }
+
+    // Always resolve SKUs for all items in order
+    if (Array.isArray(items) && items.length > 0) {
+      for (const it of items) {
+        if (!it) continue;
+        const vId = it.variant_id || it.variantId;
+        const pId = it.product_id || it.productId || it.id;
+
+        // 1. Resolve variant SKU if missing
+        if (!it.variant_sku && vId) {
+          try {
+            const vRows = await executeMySQL('SELECT sku, variant_name, title FROM product_variants WHERE id = ?', [vId]);
+            if (vRows && vRows[0]?.sku) {
+              it.variant_sku = (vRows[0].sku || '').trim();
+            } else {
+              try {
+                const locV = db.prepare('SELECT sku FROM product_variants WHERE id = ?').get(vId);
+                if (locV?.sku) it.variant_sku = (locV.sku || '').trim();
+              } catch (e) {}
+            }
+          } catch (e) {}
+        }
+
+        // 2. Resolve product SKU if missing
+        if (!it.product_sku && pId) {
+          try {
+            const pRows = await executeMySQL('SELECT sku, title FROM products WHERE id = ?', [pId]);
+            if (pRows && pRows[0]?.sku) {
+              it.product_sku = (pRows[0].sku || '').trim();
+            } else {
+              try {
+                const locP = db.prepare('SELECT sku FROM products WHERE id = ?').get(pId);
+                if (locP?.sku) it.product_sku = (locP.sku || '').trim();
+              } catch (e) {}
+            }
+          } catch (e) {}
+        }
+
+        // 3. Fallback logic for sku
+        const baseSku = it.variant_sku || it.product_sku || (vId ? `VL-VAR-${vId}` : (pId ? `VL-${pId}` : 'VL-ITEM'));
+        it.sku = it.sku || baseSku;
+        it.variant_sku = it.variant_sku || (vId ? it.sku : null);
+        it.product_sku = it.product_sku || it.sku;
+      }
+    }
+
+    ord.items = items || [];
   }
   return Array.isArray(orders) ? orderList : orderList[0];
 }
