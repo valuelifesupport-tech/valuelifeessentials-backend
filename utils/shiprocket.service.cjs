@@ -8,10 +8,10 @@ const SHIPROCKET_BASE_URL = 'https://apiv2.shiprocket.in/v1/external';
 
 class ShiprocketService {
   constructor() {
-    this.email = process.env.SHIPROCKET_EMAIL || 'valuelifesupport@gmail.com';
-    this.apiKey = process.env.SHIPROCKET_API_KEY || 'CqMn1w8MOq5s%%u$&y2JBuiJqqn$Wb3j';
+    this.email = process.env.SHIPROCKET_EMAIL || '';
+    this.apiKey = process.env.SHIPROCKET_API_KEY || '';
     this.defaultPickupPincode = process.env.SHIPROCKET_DEFAULT_PICKUP_PINCODE || '400001';
-    this.channelId = process.env.SHIPROCKET_CHANNEL_ID || '12238334';
+    this.channelId = process.env.SHIPROCKET_CHANNEL_ID || '';
   }
 
   // 1. AUTHENTICATE AND OBTAIN 10-DAY JWT TOKEN

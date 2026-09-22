@@ -20,15 +20,15 @@ function resolveImageUrl(url) {
     return clean;
   }
   if (clean.startsWith('/uploads/')) {
-    return `https://backend.valuelifeessentials.com${clean}`;
+    return `${process.env.BACKEND_URL || 'http://localhost:5000'}${clean}`;
   }
   if (clean.startsWith('uploads/')) {
-    return `https://backend.valuelifeessentials.com/${clean}`;
+    return `${process.env.BACKEND_URL || 'http://localhost:5000'}/${clean}`;
   }
   if (clean.startsWith('/')) {
-    return `https://valuelifeessentials.com${clean}`;
+    return `${process.env.FRONTEND_URL || 'http://localhost:5173'}${clean}`;
   }
-  return `https://backend.valuelifeessentials.com/uploads/${clean}`;
+  return `${process.env.BACKEND_URL || 'http://localhost:5000'}/uploads/${clean}`;
 }
 
 function buildOrderConfirmationEmailHtml({
@@ -272,13 +272,13 @@ function buildOrderConfirmationEmailHtml({
           <tr>
             <td style="padding: 0 28px 28px 28px; text-align: center;">
               <a 
-                href="https://valuelifeessentials.com/profile?tab=orders" 
+                href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/profile?tab=orders" 
                 style="display: inline-block; background-color: #1b4332; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 800; padding: 14px 32px; border-radius: 10px; letter-spacing: 0.3px; box-shadow: 0 2px 6px rgba(27,67,50,0.3);"
               >
                 Track Your Order Live →
               </a>
               <div style="margin-top: 18px; font-size: 12px; color: #64748b; line-height: 1.5;">
-                Need help with your order? Reply directly to this email or reach us at <a href="mailto:valuelifesupport@gmail.com" style="color: #1b4332; font-weight: 600; text-decoration: underline;">valuelifesupport@gmail.com</a>.
+                Need help with your order? Reply directly to this email or reach us at <a href="mailto:${process.env.SUPPORT_EMAIL || ''}" style="color: #1b4332; font-weight: 600; text-decoration: underline;">${process.env.SUPPORT_EMAIL || ''}</a>.
               </div>
             </td>
           </tr>

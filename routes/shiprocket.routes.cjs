@@ -157,7 +157,7 @@ router.post('/api/shipping/shiprocket/assign-awb', async (req, res) => {
               <p style="margin: 4px 0; font-size: 14px;"><b>AWB / Tracking Number:</b> <span style="font-family: monospace; font-weight: bold; color: #047857;">${awbResult.awb_code}</span></p>
               <p style="margin: 4px 0; font-size: 14px;"><b>Delivery Address:</b> ${orderRecord.shipping_address}</p>
             </div>
-            <p style="color: #475569; font-size: 14px;">You can track real-time delivery milestones anytime on <a href="https://valuelifeessentials.com" style="color: #164e3f; font-weight: bold;">valuelifeessentials.com</a> under your account profile.</p>
+            <p style="color: #475569; font-size: 14px;">You can track real-time delivery milestones anytime on <a href="${process.env.FRONTEND_URL || ''}" style="color: #164e3f; font-weight: bold;">valuelifeessentials.com</a> under your account profile.</p>
             <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">Thank you for choosing pure, certified organic wellness!</p>
           </div>`
         ).catch(e => console.warn('Shipping email warning:', e.message));

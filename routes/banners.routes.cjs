@@ -276,7 +276,7 @@ router.post(['/api/instagram-posts', '/api/admin/instagram-posts'], requireAdmin
       [
         title || '',
         image_url,
-        post_url || 'https://www.instagram.com/valuelife_essentials/?hl=en',
+        post_url || process.env.INSTAGRAM_URL || '',
         Number(sort_order) || 0,
         Number(is_active) ?? 1
       ]
@@ -289,7 +289,7 @@ router.post(['/api/instagram-posts', '/api/admin/instagram-posts'], requireAdmin
           newId,
           title || '',
           image_url,
-          post_url || 'https://www.instagram.com/valuelife_essentials/?hl=en',
+          post_url || process.env.INSTAGRAM_URL || '',
           Number(sort_order) || 0,
           Number(is_active) ?? 1
         );
@@ -300,7 +300,7 @@ router.post(['/api/instagram-posts', '/api/admin/instagram-posts'], requireAdmin
       id: newId,
       title,
       image_url,
-      post_url: post_url || 'https://www.instagram.com/valuelife_essentials/?hl=en',
+      post_url: post_url || process.env.INSTAGRAM_URL || '',
       sort_order,
       is_active
     });
@@ -320,7 +320,7 @@ router.put(['/api/instagram-posts/:id', '/api/admin/instagram-posts/:id'], requi
       [
         title || '',
         image_url,
-        post_url || 'https://www.instagram.com/valuelife_essentials/?hl=en',
+        post_url || process.env.INSTAGRAM_URL || '',
         Number(sort_order) || 0,
         Number(is_active) ?? 1,
         id
@@ -332,7 +332,7 @@ router.put(['/api/instagram-posts/:id', '/api/admin/instagram-posts/:id'], requi
         .run(
           title || '',
           image_url,
-          post_url || 'https://www.instagram.com/valuelife_essentials/?hl=en',
+          post_url || process.env.INSTAGRAM_URL || '',
           Number(sort_order) || 0,
           Number(is_active) ?? 1,
           id

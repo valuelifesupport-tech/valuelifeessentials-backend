@@ -31,7 +31,7 @@ router.get('/api/payment/gateways', (req, res) => {
 router.get(['/api/payment/config', '/api/payment/razorpay/key'], (req, res) => {
   try {
     const active = paymentManager.getActiveGateways();
-    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID || 'rzp_live_Tf0pnP0D2dQz4M';
+    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID;
     res.json({
       gateways: active,
       razorpay_key_id: keyId,
@@ -233,8 +233,8 @@ router.post(['/api/payment/failure', '/api/payment/razorpay/failure'], async (re
                 <p style="margin: 4px 0; font-size: 14px;"><b>Order Amount:</b> ₹${Number(ord.total_amount).toLocaleString('en-IN')}</p>
                 <p style="margin: 4px 0; font-size: 14px;"><b>Reason:</b> ${error_description || 'Checkout closed before payment'}</p>
               </div>
-              <p style="color: #475569; font-size: 14px;">If this was accidental or you wish to complete your purchase, your items are still waiting for you. You can return to <a href="https://valuelifeessentials.com" style="color: #164e3f; font-weight: bold;">ValueLife Essentials</a> anytime.</p>
-              <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">If you have any questions, contact us at valuelifesupport@gmail.com.</p>
+              <p style="color: #475569; font-size: 14px;">If this was accidental or you wish to complete your purchase, your items are still waiting for you. You can return to <a href="${process.env.FRONTEND_URL || 'https://valuelifeessentials.com'}" style="color: #164e3f; font-weight: bold;">ValueLife Essentials</a> anytime.</p>
+              <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">If you have any questions, contact us at ${process.env.SUPPORT_EMAIL || ''}.</p>
             </div>`
           ).catch(e => console.warn('Payment cancel email warn:', e.message));
         }
@@ -404,7 +404,7 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
 // POST Razorpay Webhook
 router.post('/api/payment/razorpay/webhook', async (req, res) => {
   try {
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || 'valuelife_webhook_secret_2026';
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
     const signature = req.headers['x-razorpay-signature'];
     
     // SECURITY: Webhook payload must use raw bytes for accurate HMAC.

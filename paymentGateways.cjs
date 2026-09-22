@@ -41,8 +41,8 @@ const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require('./config/constants.cjs
 // 1. RAZORPAY GATEWAY ADAPTER (Supports Live Keys + High-Fidelity Dummy/Test Mode)
 class RazorpayGateway extends BaseGateway {
   constructor() {
-    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID || 'rzp_live_Tf0pnP0D2dQz4M';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET || '5Tg6D8eMZ6q7LLQKXGH0auM2';
+    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET;
     const hasLiveKeys = Boolean(keyId && keySecret && keyId.startsWith('rzp_'));
 
     super({
@@ -165,8 +165,8 @@ class PhonePeGateway extends BaseGateway {
       icon: 'phonepe'
     });
 
-    this.merchantId = merchantId || 'PGTESTPAYUAT';
-    this.saltKey = saltKey || '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399';
+    this.merchantId = merchantId || '';
+    this.saltKey = saltKey || '';
     this.saltIndex = process.env.PHONEPE_SALT_INDEX || '1';
     this.env = process.env.PHONEPE_ENV || 'UAT';
   }
@@ -217,8 +217,8 @@ class CashfreeGateway extends BaseGateway {
       icon: 'cashfree'
     });
 
-    this.appId = appId || 'CF_TEST_APP';
-    this.secretKey = secretKey || 'CF_TEST_SECRET';
+    this.appId = appId || '';
+    this.secretKey = secretKey || '';
   }
 
   async createOrder({ amount, currency = 'INR', orderId }) {
@@ -261,7 +261,7 @@ class PaytmGateway extends BaseGateway {
       icon: 'paytm'
     });
 
-    this.mid = mid || 'PAYTM_TEST_MID';
+    this.mid = mid || '';
   }
 
   async createOrder({ amount, currency = 'INR', orderId }) {

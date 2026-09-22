@@ -657,7 +657,7 @@ router.put([
             <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> #${updated[0].order_number || id}</p>
             <p style="margin: 4px 0; font-size: 14px;"><b>Status:</b> CANCELLED</p>
           </div>
-          <p style="font-size: 12px; color: #94a3b8;">If you have any questions, please reach out to us at valuelifesupport@gmail.com.</p>
+          <p style="font-size: 12px; color: #94a3b8;">If you have any questions, please reach out to us at ${process.env.SUPPORT_EMAIL || ''}.</p>
         </div>`
       ).catch(() => {});
     }
@@ -732,7 +732,7 @@ router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], async (req, re
               <p style="margin: 4px 0; font-size: 14px;"><b>Order Number:</b> #${ord.order_number || id}</p>
               <p style="margin: 4px 0; font-size: 14px;"><b>Status:</b> CANCELLED</p>
             </div>
-            <p style="font-size: 12px; color: #94a3b8;">If you have any questions or this was done in error, please reach out to us at valuelifesupport@gmail.com.</p>
+            <p style="font-size: 12px; color: #94a3b8;">If you have any questions or this was done in error, please reach out to us at ${process.env.SUPPORT_EMAIL || ''}.</p>
           </div>`
         ).catch(() => {});
       }

@@ -19,14 +19,12 @@ const errorHandler = require('./middleware/errorHandler.cjs');
 const app = express();
 
 // UNIVERSAL CORS & SECURITY HEADERS
-const ALLOWED_ORIGINS = new Set([
-  'https://valuelifeessentials.com',
-  'https://www.valuelifeessentials.com',
-  'https://admin.valuelifeessentials.com',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:3000'
-]);
+const ALLOWED_ORIGINS = new Set(
+  (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:3000')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+);
 
 app.use((req, res, next) => {
   const origin = req.headers.origin || '';

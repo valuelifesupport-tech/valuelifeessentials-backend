@@ -62,7 +62,7 @@ router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
       success: true,
       token,
       admin: {
-        email: email || 'admin@valuelifeessentials.com',
+        email: email || process.env.ADMIN_EMAIL || process.env.SUPPORT_EMAIL || '',
         role: 'ADMIN',
         name: 'Master Admin'
       }

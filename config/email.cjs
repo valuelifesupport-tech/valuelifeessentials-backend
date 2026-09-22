@@ -2,7 +2,7 @@ const nodemailer = require('nodemailer');
 
 const mailTransporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT) || 465,
+  port: parseInt(process.env.SMTP_PORT || '465'),
   secure: (process.env.SMTP_PORT == '465' || !process.env.SMTP_PORT),
   auth: {
     user: process.env.SMTP_USER || '',
@@ -14,7 +14,7 @@ const sendEmailNotification = async (to, subject, htmlBody) => {
   if (!to || !to.includes('@')) return false;
   try {
     await mailTransporter.sendMail({
-      from: `"${process.env.SMTP_FROM_NAME || 'ValueLife Essentials'}" <${process.env.SMTP_USER || 'valuelifesupport@gmail.com'}>`,
+      from: `"${process.env.SMTP_FROM_NAME || 'ValueLife Essentials'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || ''}>`,
       to,
       subject,
       html: htmlBody

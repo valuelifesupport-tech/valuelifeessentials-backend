@@ -64,8 +64,8 @@ router.post('/api/maintenance/toggle', requireAdminAuth, async (req, res) => {
 // Maintenance Verify Password
 router.post('/api/maintenance/verify', (req, res) => {
   const { password } = req.body || {};
-  const validPass = process.env.MAINTENANCE_PASSWORD || MAINTENANCE_PASSWORD || 'valuelife2026';
-  if (password === validPass || password === 'valuelife2026' || password === 'admin123') {
+  const MAINT_PASS = process.env.MAINTENANCE_PASSWORD || '';
+  if (password === MAINT_PASS) {
     return res.json({ success: true, token: 'maint_bypass_valuelife_' + Date.now() });
   }
   res.status(401).json({ success: false, error: 'Incorrect maintenance bypass password' });

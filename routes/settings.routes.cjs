@@ -66,15 +66,15 @@ router.get('/api/settings', async (req, res) => {
       id: 1,
       announcement_text: 'Free Express Shipping Across India on Orders Above ₹499!',
       announcement_code: 'VALUELIFE15',
-      contact_phone: '+91 76759 41899, +91 78931 00755',
-      contact_email: 'valuelifesupport@gmail.com',
+      contact_phone: process.env.SUPPORT_PHONE || '',
+      contact_email: process.env.SUPPORT_EMAIL || '',
       partial_deposit_percent: 20,
       enable_multi_currency: 1,
       enable_cod: 1,
       enable_partial_payment: 1,
       prepaid_discount_percent: 5,
       enable_gst: 1,
-      gstin_number: '27AAAAA0000A1Z5'
+      gstin_number: process.env.STORE_GSTIN || ''
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
