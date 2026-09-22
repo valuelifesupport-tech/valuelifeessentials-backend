@@ -16,8 +16,12 @@ const ALLOWED_SETTINGS_COLS = new Set([
   'enable_free_shipping'
 ]);
 const ALLOWED_HERO_COLS = new Set([
-  'headline', 'subheadline', 'badge_text', 'primary_cta_text', 'primary_cta_link',
-  'secondary_cta_text', 'secondary_cta_link', 'bg_image_url', 'bg_video_url',
+  'hero_enabled', 'active_style', 'badge_text', 'title', 'subtitle',
+  'primary_btn_text', 'primary_btn_link', 'secondary_btn_text', 'secondary_btn_link',
+  'image_url', 'bg_image_url', 'card_1_title', 'card_1_sub', 'card_1_img',
+  'card_2_title', 'card_2_sub', 'card_2_img',
+  'headline', 'subheadline', 'primary_cta_text', 'primary_cta_link',
+  'secondary_cta_text', 'secondary_cta_link', 'bg_video_url',
   'overlay_opacity', 'text_color', 'layout_style'
 ]);
 const ALLOWED_THEME_COLS = new Set([
@@ -25,10 +29,15 @@ const ALLOWED_THEME_COLS = new Set([
   'bg_color', 'text_color', 'border_radius', 'card_style'
 ]);
 const ALLOWED_SECTIONS_COLS = new Set([
-  'show_announcement_bar', 'show_hero', 'show_categories', 'show_featured_products',
+  'show_announcement', 'show_announcement_bar', 'show_hero', 'show_trust_badges',
+  'show_promo_banners', 'show_categories_slider', 'show_categories', 'show_featured_products',
   'show_editorial_promo', 'show_why_choose_us', 'show_bestsellers', 'show_brand_story',
   'show_testimonials', 'show_instagram_feed', 'show_newsletter', 'show_footer',
-  'show_reviews', 'show_collections', 'show_banners'
+  'show_sales_ticker', 'sales_ticker_json', 'trust_badge_1_title', 'trust_badge_1_sub',
+  'trust_badge_2_title', 'trust_badge_2_sub', 'trust_badge_3_title', 'trust_badge_3_sub',
+  'trust_badge_4_title', 'trust_badge_4_sub', 'show_blog_section', 'show_reviews',
+  'show_collections', 'show_banners', 'category_slider_title', 'bestsellers_title',
+  'bestsellers_badge', 'bestsellers_count'
 ]);
 const ALLOWED_EDITORIAL_COLS = new Set([
   'badge_text', 'title_part1', 'title_part2', 'subtitle', 'cta_text', 'cta_link',
@@ -101,18 +110,30 @@ router.get('/api/currency/detect', (req, res) => {
 });
 
 // GET Hero Config
-router.get('/api/hero-config', async (req, res) => {
+router.get(['/api/hero-config', '/api/admin/hero-config'], async (req, res) => {
   try {
     let row = await executeMySQL('SELECT * FROM store_hero_config WHERE id = 1');
-    if (row && row.length > 0) return res.json(row[0]);
+    if (row && row.length > 0) {
+      const data = row[0];
+      data.hero_enabled = data.hero_enabled !== undefined && data.hero_enabled !== null ? Number(data.hero_enabled) : 1;
+      return res.json(data);
+    }
     row = db.prepare('SELECT * FROM store_hero_config WHERE id = 1').get();
-    res.json(row || {
+    if (row) {
+      row.hero_enabled = row.hero_enabled !== undefined && row.hero_enabled !== null ? Number(row.hero_enabled) : 1;
+      return res.json(row);
+    }
+    res.json({
       id: 1,
-      headline: 'Better Choices Better Life.',
-      subheadline: 'Discover natural, healthy and premium products for a smarter, happier everyday life.',
-      badge_text: 'NATURAL • HEALTHY • SUSTAINABLE',
-      primary_cta_text: 'Shop Now',
-      primary_cta_link: '/products'
+      hero_enabled: 1,
+      active_style: 'SPLIT',
+      title: 'Better Choices Better Life.',
+      subtitle: 'Discover natural, healthy and premium products for a smarter, happier everyday life.',
+      badge_text: '100% Certified Organic Superfoods',
+      primary_btn_text: 'Shop Now',
+      primary_btn_link: '/products',
+      secondary_btn_text: 'Explore Offers',
+      secondary_btn_link: '/offers'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -132,6 +153,16 @@ router.put('/api/admin/hero-config', requireAdminAuth, async (req, res) => {
     try {
       db.prepare(`UPDATE store_hero_config SET ${setSql} WHERE id = 1`).run(...vals);
     } catch (e) {}
+
+    // Synchronize store_sections_config.show_hero if hero_enabled was provided
+    if (fields.hero_enabled !== undefined) {
+      const isEnabled = (fields.hero_enabled === 1 || fields.hero_enabled === true || fields.hero_enabled === '1') ? 1 : 0;
+      try {
+        await executeMySQL('UPDATE store_sections_config SET show_hero = ? WHERE id = 1', [isEnabled]);
+        db.prepare('UPDATE store_sections_config SET show_hero = ? WHERE id = 1').run(isEnabled);
+      } catch (e) {}
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -213,6 +244,16 @@ router.put(['/api/sections-config', '/api/admin/sections-config'], requireAdminA
     try {
       db.prepare(`UPDATE store_sections_config SET ${setSql} WHERE id = 1`).run(...vals);
     } catch (e) {}
+
+    // Synchronize store_hero_config.hero_enabled if show_hero was provided
+    if (fields.show_hero !== undefined) {
+      const isEnabled = (fields.show_hero === 1 || fields.show_hero === true || fields.show_hero === '1') ? 1 : 0;
+      try {
+        await executeMySQL('UPDATE store_hero_config SET hero_enabled = ? WHERE id = 1', [isEnabled]);
+        db.prepare('UPDATE store_hero_config SET hero_enabled = ? WHERE id = 1').run(isEnabled);
+      } catch (e) {}
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
