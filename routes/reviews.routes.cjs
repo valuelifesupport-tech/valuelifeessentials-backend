@@ -267,6 +267,20 @@ router.post('/api/admin/reviews/manual', requireAdminAuth, async (req, res) => {
       [product_id, user_name, user_email || '', Number(rating), title || '', comment || '', 'APPROVED']
     );
     const newId = myRes ? myRes.insertId : Date.now();
+
+    // SQLite dual-write for manual review
+    try {
+      db.prepare(
+        'INSERT OR REPLACE INTO product_reviews (id, product_id, user_name, customer_name, user_email, customer_email, rating, title, review_title, comment, review_text, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(newId, product_id, user_name, user_name, user_email || '', user_email || '', Number(rating), title || '', title || '', comment || '', comment || '', 'APPROVED');
+    } catch (e) {
+      try {
+        db.prepare('INSERT OR REPLACE INTO product_reviews (id, product_id, user_name, user_email, rating, title, comment, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+          newId, product_id, user_name, user_email || '', Number(rating), title || '', comment || '', 'APPROVED'
+        );
+      } catch (e2) {}
+    }
+
     res.json({ id: newId, success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -559,6 +559,124 @@ function initDb(db) {
   try { db.exec(`ALTER TABLE product_variants ADD COLUMN compare_price_inr REAL`); } catch (e) {}
   try { db.exec(`ALTER TABLE product_variants ADD COLUMN compare_price_usd REAL`); } catch (e) {}
 
+  // B1: Add missing store_settings columns referenced in ALLOWED_SETTINGS_COLS whitelist
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN store_name TEXT DEFAULT 'ValueLife Essentials'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN store_tagline TEXT DEFAULT 'Pure Organic Products'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN store_logo TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN store_favicon TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN currency TEXT DEFAULT 'INR'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN address_line1 TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN address_line2 TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN city TEXT DEFAULT ''`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN state TEXT DEFAULT 'Maharashtra'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN country TEXT DEFAULT 'India'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN pincode TEXT DEFAULT ''`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN instagram_url TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN facebook_url TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN twitter_url TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN youtube_url TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN whatsapp_number TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN google_analytics_id TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN meta_pixel_id TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN maintenance_mode INTEGER DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN maintenance_password TEXT`); } catch (e) {}
+
+  // B2: Add missing orders columns for SQLite dual-write
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_city TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_state TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_pincode TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN courier_name TEXT DEFAULT ''`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN tracking_number TEXT DEFAULT ''`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN user_id INTEGER`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payment_gateway TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN gateway_order_id TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN gateway_payment_id TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN state_name TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN subtotal REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN discount_amount REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN coupon_code TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN tax_amount REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_amount REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payable_amount REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN cod_balance_amount REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN is_partial_payment INTEGER DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN payment_method TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN remark TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN items_json TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN cancellation_reason TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN cancellation_notes TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN transaction_id TEXT`); } catch (e) {}
+
+  // B3: Add missing order_items columns for SQLite dual-write
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN product_name TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN product_title TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN total REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN image_url TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE order_items ADD COLUMN price_inr REAL DEFAULT 0`); } catch (e) {}
+
+  // R2-B1: Add missing products columns used in INSERT/UPDATE
+  try { db.exec(`ALTER TABLE products ADD COLUMN image_url TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE products ADD COLUMN gst_percent REAL DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE products ADD COLUMN gst_rate REAL DEFAULT 0`); } catch (e) {}
+
+  // R2-B2: Add title to product_variants (SQLite has variant_name, route uses both)
+  try { db.exec(`ALTER TABLE product_variants ADD COLUMN title TEXT DEFAULT ''`); } catch (e) {}
+
+  // R2-B4: Collections missing columns
+  try { db.exec(`ALTER TABLE collections ADD COLUMN show_in_navbar INTEGER DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE collections ADD COLUMN sort_order INTEGER DEFAULT 0`); } catch (e) {}
+
+  // R2-B5: Subcategories missing sort_order
+  try { db.exec(`ALTER TABLE subcategories ADD COLUMN sort_order INTEGER DEFAULT 0`); } catch (e) {}
+
+  // R2-B8: Hero phantom columns (in ALLOWED_HERO_COLS whitelist but not in table)
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN headline TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN subheadline TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN primary_cta_text TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN primary_cta_link TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN secondary_cta_text TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN secondary_cta_link TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN bg_video_url TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN overlay_opacity REAL DEFAULT 0.5`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN text_color TEXT DEFAULT '#ffffff'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_hero_config ADD COLUMN layout_style TEXT DEFAULT 'SPLIT'`); } catch (e) {}
+
+  // R2-B8: Theme phantom columns
+  try { db.exec(`ALTER TABLE store_theme_config ADD COLUMN font_family TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_theme_config ADD COLUMN bg_color TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_theme_config ADD COLUMN text_color TEXT`); } catch (e) {}
+
+  // R2-B8: Sections phantom columns (in ALLOWED_SECTIONS_COLS but not in SQLite table)
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_announcement_bar INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_categories INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_featured_products INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_editorial_promo INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_why_choose_us INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_brand_story INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_testimonials INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_blog_section INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_instagram_feed INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_newsletter INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_reviews INTEGER DEFAULT 0`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_collections INTEGER DEFAULT 1`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_sections_config ADD COLUMN show_banners INTEGER DEFAULT 1`); } catch (e) {}
+
+  // R2-B9: Reviews alias columns
+  try { db.exec(`ALTER TABLE product_reviews ADD COLUMN customer_name TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE product_reviews ADD COLUMN customer_email TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE product_reviews ADD COLUMN review_title TEXT`); } catch (e) {}
+  try { db.exec(`ALTER TABLE product_reviews ADD COLUMN review_text TEXT`); } catch (e) {}
+
+  // R2-Newsletter: Create newsletter_subscribers table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE NOT NULL,
+      source TEXT DEFAULT 'website',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   db.exec(`INSERT OR IGNORE INTO store_settings (id) VALUES (1)`);
 
   // seedInitialData disabled to prevent auto-reseeding on deleted categories

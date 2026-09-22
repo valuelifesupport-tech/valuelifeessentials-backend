@@ -493,6 +493,30 @@ router.delete(['/api/variants/:id', '/api/products/variants/:id'], requireAdminA
   }
 });
 
+// DELETE Purge All Products (MUST be above :id to avoid param match)
+router.delete('/api/products/purge-all', requireAdminAuth, async (req, res) => {
+  try {
+    await executeMySQL('DELETE FROM product_collections');
+    await executeMySQL('DELETE FROM product_images');
+    await executeMySQL('DELETE FROM product_variants');
+    await executeMySQL('DELETE FROM product_reviews');
+    await executeMySQL('DELETE FROM products');
+    await executeMySQL('ALTER TABLE products AUTO_INCREMENT = 1');
+
+    try {
+      db.prepare('DELETE FROM product_collections').run();
+      db.prepare('DELETE FROM product_images').run();
+      db.prepare('DELETE FROM product_variants').run();
+      db.prepare('DELETE FROM product_reviews').run();
+      db.prepare('DELETE FROM products').run();
+    } catch (e) {}
+
+    res.json({ success: true, message: 'All products purged' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE Single Product
 router.delete('/api/products/:id', requireAdminAuth, async (req, res) => {
   try {
@@ -512,30 +536,6 @@ router.delete('/api/products/:id', requireAdminAuth, async (req, res) => {
     } catch (e) {}
 
     res.json({ success: true, message: 'Product deleted' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE Purge All Products
-router.delete('/api/products/purge-all', requireAdminAuth, async (req, res) => {
-  try {
-    await executeMySQL('DELETE FROM product_collections');
-    await executeMySQL('DELETE FROM product_images');
-    await executeMySQL('DELETE FROM product_variants');
-    await executeMySQL('DELETE FROM product_reviews');
-    await executeMySQL('DELETE FROM products');
-    await executeMySQL('ALTER TABLE products AUTO_INCREMENT = 1');
-
-    try {
-      db.prepare('DELETE FROM product_collections').run();
-      db.prepare('DELETE FROM product_images').run();
-      db.prepare('DELETE FROM product_variants').run();
-      db.prepare('DELETE FROM product_reviews').run();
-      db.prepare('DELETE FROM products').run();
-    } catch (e) {}
-
-    res.json({ success: true, message: 'All products purged' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -104,6 +104,7 @@ app.use(require('./routes/payment.routes.cjs'));
 app.use(require('./routes/products.routes.cjs'));
 app.use(require('./routes/orders.routes.cjs'));
 app.use(require('./routes/shiprocket.routes.cjs'));
+app.use(require('./routes/newsletter.routes.cjs'));
 
 // CENTRAL ERROR HANDLER
 app.use(errorHandler);

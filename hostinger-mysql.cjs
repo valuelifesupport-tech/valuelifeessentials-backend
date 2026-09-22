@@ -569,7 +569,14 @@ async function setupHostingerMySQL() {
       'ADD COLUMN IF NOT EXISTS is_partial_payment TINYINT DEFAULT 0',
       'ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)',
       'ADD COLUMN IF NOT EXISTS remark TEXT',
-      'ADD COLUMN IF NOT EXISTS items_json LONGTEXT'
+      'ADD COLUMN IF NOT EXISTS items_json LONGTEXT',
+      'ADD COLUMN IF NOT EXISTS shipping_city VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS shipping_state VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS shipping_pincode VARCHAR(20)',
+      'ADD COLUMN IF NOT EXISTS user_id INT',
+      'ADD COLUMN IF NOT EXISTS payment_gateway VARCHAR(50)',
+      'ADD COLUMN IF NOT EXISTS gateway_order_id VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS gateway_payment_id VARCHAR(100)'
     ];
     for (const c of orderCols) {
       try { await connection.query('ALTER TABLE orders ' + c); } catch (e) {}
@@ -581,11 +588,136 @@ async function setupHostingerMySQL() {
       'ADD COLUMN IF NOT EXISTS variant_name VARCHAR(255)',
       'ADD COLUMN IF NOT EXISTS price DECIMAL(10,2) DEFAULT 0',
       'ADD COLUMN IF NOT EXISTS total DECIMAL(10,2) DEFAULT 0',
-      'ADD COLUMN IF NOT EXISTS variant_title VARCHAR(255)'
+      'ADD COLUMN IF NOT EXISTS variant_title VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS product_title VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS image_url TEXT',
+      'ADD COLUMN IF NOT EXISTS price_inr DECIMAL(10,2) DEFAULT 0'
     ];
     for (const c of itemCols) {
       try { await connection.query('ALTER TABLE order_items ' + c); } catch (e) {}
     }
+
+    // B1: Add missing store_settings columns for settings whitelist
+    const settingsCols = [
+      'ADD COLUMN IF NOT EXISTS store_name VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS store_tagline VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS store_logo TEXT',
+      'ADD COLUMN IF NOT EXISTS store_favicon TEXT',
+      'ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT \'INR\'',
+      'ADD COLUMN IF NOT EXISTS address_line1 TEXT',
+      'ADD COLUMN IF NOT EXISTS address_line2 TEXT',
+      'ADD COLUMN IF NOT EXISTS city VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS state VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS country VARCHAR(100) DEFAULT \'India\'',
+      'ADD COLUMN IF NOT EXISTS pincode VARCHAR(20)',
+      'ADD COLUMN IF NOT EXISTS instagram_url VARCHAR(500)',
+      'ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(500)',
+      'ADD COLUMN IF NOT EXISTS twitter_url VARCHAR(500)',
+      'ADD COLUMN IF NOT EXISTS youtube_url VARCHAR(500)',
+      'ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(50)',
+      'ADD COLUMN IF NOT EXISTS google_analytics_id VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS meta_pixel_id VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS maintenance_mode INT DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS maintenance_password VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS shipping_fee DECIMAL(10,2) DEFAULT 50.00',
+      'ADD COLUMN IF NOT EXISTS free_shipping_threshold DECIMAL(10,2) DEFAULT 499.00',
+      'ADD COLUMN IF NOT EXISTS enable_free_shipping INT DEFAULT 1'
+    ];
+    for (const c of settingsCols) {
+      try { await connection.query('ALTER TABLE store_settings ' + c); } catch (e) {}
+    }
+
+    // R2-B1: Products missing columns
+    const prodCols = [
+      'ADD COLUMN IF NOT EXISTS image_url TEXT',
+      'ADD COLUMN IF NOT EXISTS gst_percent DECIMAL(5,2) DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS gst_rate DECIMAL(5,2) DEFAULT 0'
+    ];
+    for (const c of prodCols) {
+      try { await connection.query('ALTER TABLE products ' + c); } catch (e) {}
+    }
+
+    // R2-B2: Variants missing variant_name (MySQL has title, route uses both)
+    try { await connection.query('ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS variant_name VARCHAR(255) DEFAULT \'\''); } catch (e) {}
+
+    // R2-B4: Collections missing columns
+    try { await connection.query('ALTER TABLE collections ADD COLUMN IF NOT EXISTS show_in_navbar INT DEFAULT 0'); } catch (e) {}
+    try { await connection.query('ALTER TABLE collections ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0'); } catch (e) {}
+
+    // R2-B5: Subcategories missing sort_order
+    try { await connection.query('ALTER TABLE subcategories ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0'); } catch (e) {}
+
+    // R2-B8: Hero phantom columns
+    const heroCols = [
+      'ADD COLUMN IF NOT EXISTS headline VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS subheadline TEXT',
+      'ADD COLUMN IF NOT EXISTS primary_cta_text VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS primary_cta_link VARCHAR(500)',
+      'ADD COLUMN IF NOT EXISTS secondary_cta_text VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS secondary_cta_link VARCHAR(500)',
+      'ADD COLUMN IF NOT EXISTS bg_video_url TEXT',
+      'ADD COLUMN IF NOT EXISTS overlay_opacity DECIMAL(3,2) DEFAULT 0.50',
+      'ADD COLUMN IF NOT EXISTS text_color VARCHAR(50) DEFAULT \'#ffffff\'',
+      'ADD COLUMN IF NOT EXISTS layout_style VARCHAR(50) DEFAULT \'SPLIT\'',
+      'ADD COLUMN IF NOT EXISTS card_1_title VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS card_1_sub VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS card_1_img TEXT',
+      'ADD COLUMN IF NOT EXISTS card_2_title VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS card_2_sub VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS card_2_img TEXT'
+    ];
+    for (const c of heroCols) {
+      try { await connection.query('ALTER TABLE store_hero_config ' + c); } catch (e) {}
+    }
+
+    // R2-B8: Theme phantom columns
+    const themeCols = [
+      'ADD COLUMN IF NOT EXISTS font_family VARCHAR(100)',
+      'ADD COLUMN IF NOT EXISTS bg_color VARCHAR(50)',
+      'ADD COLUMN IF NOT EXISTS text_color VARCHAR(50)',
+      'ADD COLUMN IF NOT EXISTS border_radius VARCHAR(50) DEFAULT \'rounded-3xl\'',
+      'ADD COLUMN IF NOT EXISTS card_style VARCHAR(50) DEFAULT \'ORGANIC_BAZAR\''
+    ];
+    for (const c of themeCols) {
+      try { await connection.query('ALTER TABLE store_theme_config ' + c); } catch (e) {}
+    }
+
+    // R2-B8: Sections phantom columns
+    const sectionsCols = [
+      'ADD COLUMN IF NOT EXISTS show_announcement_bar INT DEFAULT 1',
+      'ADD COLUMN IF NOT EXISTS show_categories INT DEFAULT 1',
+      'ADD COLUMN IF NOT EXISTS show_reviews INT DEFAULT 0',
+      'ADD COLUMN IF NOT EXISTS show_collections INT DEFAULT 1',
+      'ADD COLUMN IF NOT EXISTS show_banners INT DEFAULT 1',
+      'ADD COLUMN IF NOT EXISTS category_slider_title VARCHAR(255) DEFAULT \'Shop By Categories\'',
+      'ADD COLUMN IF NOT EXISTS bestsellers_title VARCHAR(255) DEFAULT \'🔥 Best Seller Products\'',
+      'ADD COLUMN IF NOT EXISTS bestsellers_badge VARCHAR(255) DEFAULT \'HIGH DEMAND ITEMS\'',
+      'ADD COLUMN IF NOT EXISTS bestsellers_count INT DEFAULT 8'
+    ];
+    for (const c of sectionsCols) {
+      try { await connection.query('ALTER TABLE store_sections_config ' + c); } catch (e) {}
+    }
+
+    // R2-B9: Reviews alias columns
+    const reviewCols = [
+      'ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS review_title VARCHAR(255)',
+      'ADD COLUMN IF NOT EXISTS review_text TEXT'
+    ];
+    for (const c of reviewCols) {
+      try { await connection.query('ALTER TABLE product_reviews ' + c); } catch (e) {}
+    }
+
+    // R2-Newsletter: Create newsletter_subscribers table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        source VARCHAR(50) DEFAULT 'website',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
 
     console.log('Seeding initial records into Hostinger MySQL tables if empty...');
 
