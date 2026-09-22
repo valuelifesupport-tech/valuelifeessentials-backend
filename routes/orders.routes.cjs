@@ -303,7 +303,7 @@ router.post('/api/orders', async (req, res) => {
     }
 
     // Determine Intra-State (CGST + SGST) vs Inter-State (IGST) dynamically from Store State
-    let storeBaseState = 'Madhya Pradesh';
+    let storeBaseState = process.env.STORE_STATE || 'Telangana';
     try {
       const sRow = await executeMySQL('SELECT store_state FROM store_settings WHERE id = 1');
       if (sRow && sRow[0] && sRow[0].store_state) storeBaseState = sRow[0].store_state.trim();

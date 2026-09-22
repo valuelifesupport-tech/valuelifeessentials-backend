@@ -65,9 +65,9 @@ router.get('/api/pages/:slug', async (req, res) => {
 <h3>Customer Support Contacts</h3>
 <ul>
   <li><strong>Customer Care Email:</strong> <a href="mailto:valuelifesupport@gmail.com">valuelifesupport@gmail.com</a></li>
-  <li><strong>Helpline Numbers:</strong> <a href="tel:+917675941899">+91 76759 41899</a> / <a href="tel:+917893100755">+91 78931 00755</a></li>
-  <li><strong>WhatsApp Support:</strong> <a href="https://wa.me/917675941899">+91 76759 41899</a> (Mon-Sat, 9:00 AM - 7:00 PM IST)</li>
-  <li><strong>Registered Office & Dispatch:</strong> Indore, Madhya Pradesh, India</li>
+  <li><strong>Helpline Numbers:</strong> <a href="tel:${process.env.STORE_PHONE_RAW || '+917893100755'}">${process.env.STORE_PHONE || '+91 78931 00755'}</a></li>
+  <li><strong>WhatsApp Support:</strong> <a href="https://wa.me/${process.env.STORE_WHATSAPP || '917893100755'}">${process.env.STORE_PHONE || '+91 78931 00755'}</a> (Mon-Sat, 9:00 AM - 7:00 PM IST)</li>
+  <li><strong>Registered Office &amp; Dispatch:</strong> ${process.env.STORE_ADDRESS || 'Hyderabad, Telangana, India'}</li>
 </ul>
 <p>You can also send us a message using the inquiry form below, and we will get back to you within 2 hours.</p>`
       },
@@ -137,7 +137,7 @@ router.get('/api/pages/:slug', async (req, res) => {
         <span class="font-bold text-slate-900">Need cancellation assistance?</span> Contact our customer support:
       </div>
       <div class="flex items-center gap-3 font-bold text-emerald-800">
-        <span>📞 +91 76759 41899 / +91 78931 00755</span>
+        <span>📞 ${process.env.STORE_PHONE || '+91 78931 00755'}</span>
         <span>✉️ valuelifesupport@gmail.com</span>
       </div>
     </div>
@@ -228,7 +228,7 @@ router.get('/api/pages/:slug', async (req, res) => {
       <p class="text-xs text-slate-400 mt-1">Dedicated customer satisfaction and assistance.</p>
     </div>
     <div class="text-xs text-left sm:text-right space-y-1">
-      <div class="font-bold text-emerald-400">📞 +91 76759 41899 / +91 78931 00755</div>
+      <div class="font-bold text-emerald-400">📞 ${process.env.STORE_PHONE || '+91 78931 00755'}</div>
       <div class="text-slate-300">✉️ valuelifesupport@gmail.com</div>
       <div class="text-[10px] text-slate-500">Mon - Sat: 9:00 AM - 7:00 PM IST</div>
     </div>
@@ -242,7 +242,7 @@ router.get('/api/pages/:slug', async (req, res) => {
 <ul>
   <li><strong>Are ValueLife products 100% natural?</strong> Yes, all products are natural, lab-tested, and free of synthetic toxins.</li>
   <li><strong>Do you offer Cash on Delivery (COD)?</strong> Yes, COD is available across most Indian postal pin codes.</li>
-  <li><strong>How do I track my order?</strong> Use the Track Order page or contact us on WhatsApp at +91 76759 41899 with your Order ID.</li>
+  <li><strong>How do I track my order?</strong> Use the Track Order page or contact us on WhatsApp at ${process.env.STORE_PHONE || '+91 78931 00755'} with your Order ID.</li>
 </ul>`
       }
     };

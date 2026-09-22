@@ -44,7 +44,7 @@ const defaultStoreSettings = {
   enable_multi_currency: 1, enable_cod: 1, enable_partial_payment: 1,
   partial_payment_heading: 'Choose Payment Breakdown Option:',
   partial_payment_subtext: 'Pay rest on Delivery', prepaid_discount_percent: 5,
-  enable_gst: 1, gstin_number: '27AAAAA0000A1Z5', store_state: 'Maharashtra',
+  enable_gst: 1, gstin_number: process.env.STORE_GSTIN || '36AAPFV4767N1Z4', store_state: process.env.STORE_STATE || 'Telangana',
   default_gst_percent: 5.0, gst_type: 'INCLUSIVE', legal_business_name: 'ValueLife Essentials Private Limited',
   all_prices_include_tax: 1, federal_tax_rate: 0.0
 };

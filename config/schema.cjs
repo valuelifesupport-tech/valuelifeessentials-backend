@@ -405,8 +405,8 @@ function initDb(db) {
   
   // GST Tax & Invoice Configuration Migrations
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN enable_gst INTEGER DEFAULT 1`); } catch (e) {}
-  try { db.exec(`ALTER TABLE store_settings ADD COLUMN gstin_number TEXT DEFAULT '27AAAAA0000A1Z5'`); } catch (e) {}
-  try { db.exec(`ALTER TABLE store_settings ADD COLUMN store_state TEXT DEFAULT 'Maharashtra'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN gstin_number TEXT DEFAULT '36AAPFV4767N1Z4'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN store_state TEXT DEFAULT 'Telangana'`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN default_gst_percent REAL DEFAULT 5.0`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN gst_type TEXT DEFAULT 'INCLUSIVE'`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN legal_business_name TEXT DEFAULT 'OrganicBazar Retail Private Limited'`); } catch (e) {}

@@ -166,7 +166,7 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
         <p style="font-size: 13px; color: #64748b;">⏱️ This verification code is valid for <strong>10 minutes</strong>.</p>
         <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">For your security, never share this code with anyone. If you did not create an account, you can safely ignore this email.</p>
         <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
-        <p style="font-size: 11px; color: #94a3b8; text-align: center;">ValueLife Essentials • valuelifesupport@gmail.com • +91 76759 41899 / +91 78931 00755</p>
+        <p style="font-size: 11px; color: #94a3b8; text-align: center;">ValueLife Essentials • ${process.env.STORE_EMAIL || 'valuelifesupport@gmail.com'} • ${process.env.STORE_PHONE || '+91 78931 00755'}</p>
       </div>`
     );
 
