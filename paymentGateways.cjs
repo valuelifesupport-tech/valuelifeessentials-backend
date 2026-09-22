@@ -41,8 +41,8 @@ const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require('./config/constants.cjs
 // 1. RAZORPAY GATEWAY ADAPTER (Supports Live Keys + High-Fidelity Dummy/Test Mode)
 class RazorpayGateway extends BaseGateway {
   constructor() {
-    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID || 'rzp_test_TcG0EYPMH8tl5L';
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET || 'qb5aHmgV3fGISbQxgQS0xxqC';
+    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID || 'rzp_live_Tf0pnP0D2dQz4M';
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET || '5Tg6D8eMZ6q7LLQKXGH0auM2';
     const hasLiveKeys = Boolean(keyId && keySecret && keyId.startsWith('rzp_'));
 
     super({

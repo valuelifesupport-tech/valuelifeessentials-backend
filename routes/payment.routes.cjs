@@ -31,7 +31,7 @@ router.get('/api/payment/gateways', (req, res) => {
 router.get(['/api/payment/config', '/api/payment/razorpay/key'], (req, res) => {
   try {
     const active = paymentManager.getActiveGateways();
-    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID || 'rzp_test_TcG0EYPMH8tl5L';
+    const keyId = process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID || 'rzp_live_Tf0pnP0D2dQz4M';
     res.json({
       gateways: active,
       razorpay_key_id: keyId,
