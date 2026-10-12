@@ -2,14 +2,17 @@
  * Hostinger Free MySQL Database Migration & Helper Utility
  * Run this script to export local data and initialize Hostinger MySQL Database.
  * Usage: node server/hostinger-mysql.cjs
+ *
+ * SCHEMA VERSIONING: Migrations only run when CURRENT_SCHEMA_VERSION changes.
+ * Bump this constant whenever new CREATE TABLE or ALTER TABLE statements are added.
  */
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 const sqliteDb = require('./db.cjs');
 
-async function setupHostingerMySQL() {
-  console.log('=== STARTING HOSTINGER FREE MYSQL DATABASE MIGRATION ===\n');
+const CURRENT_SCHEMA_VERSION = 6; // Bump this when adding new migrations
 
+async function setupHostingerMySQL() {
   let mysqlHost = process.env.MYSQL_HOST || '127.0.0.1';
   if (mysqlHost === 'localhost') mysqlHost = '127.0.0.1';
 
@@ -28,9 +31,23 @@ async function setupHostingerMySQL() {
   }
 
   try {
-    console.log(`Connecting to Hostinger MySQL Database "${config.database}" at ${config.host}:${config.port}...`);
+    console.log(`[MySQL] Connecting to "${config.database}" at ${config.host}:${config.port}...`);
     const connection = await mysql.createConnection(config);
-    console.log('✅ Connected successfully to Hostinger MySQL!');
+    console.log('[MySQL] ✅ Connected!');
+
+    // --- Schema version check: skip migrations if already up-to-date ---
+    try {
+      await connection.query(`CREATE TABLE IF NOT EXISTS _schema_version (id INT PRIMARY KEY DEFAULT 1, version INT NOT NULL DEFAULT 0, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB`);
+      await connection.query(`INSERT IGNORE INTO _schema_version (id, version) VALUES (1, 0)`);
+    } catch (e) {}
+    const [verRows] = await connection.query('SELECT version FROM _schema_version WHERE id = 1');
+    const currentVer = (verRows && verRows[0] && verRows[0].version) || 0;
+    if (currentVer >= CURRENT_SCHEMA_VERSION) {
+      console.log(`[MySQL] Schema v${currentVer} is up-to-date (need v${CURRENT_SCHEMA_VERSION}). Skipping migrations.`);
+      await connection.end();
+      return true;
+    }
+    console.log(`[MySQL] Schema v${currentVer} → v${CURRENT_SCHEMA_VERSION}. Running migrations...`);
 
     console.log('Ensuring all schema tables exist in Hostinger MySQL...');
 
@@ -761,8 +778,15 @@ async function setupHostingerMySQL() {
     `);
 
     console.log('✅ All tables & essential settings verified in Hostinger MySQL!');
+
+    // Update schema version so next boot skips all migrations
+    try {
+      await connection.query('UPDATE _schema_version SET version = ? WHERE id = 1', [CURRENT_SCHEMA_VERSION]);
+      console.log(`[MySQL] Schema version updated to v${CURRENT_SCHEMA_VERSION}`);
+    } catch (e) {}
+
     await connection.end();
-    console.log('\n=== HOSTINGER MYSQL READY FOR LIVE PRODUCTION USE ===');
+    console.log('[MySQL] ✅ Ready for production use.');
   } catch (err) {
     console.error('❌ Hostinger MySQL Setup Error:', err.message);
   }
