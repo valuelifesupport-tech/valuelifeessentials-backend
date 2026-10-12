@@ -156,13 +156,13 @@ router.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res)
     prod.gst_percent = effectiveSlugGst;
     prod.gst_rate = effectiveSlugGst;
 
-    // Fetch Related / Suggested Products with real reviews & ratings
+    // Fetch Related / Suggested Products with real reviews, ratings & variants
     let related = [];
     try {
       if (prod.category_id) {
         related = await executeMySQL(
           `SELECT p.id, p.title, p.slug, p.price_inr, p.price_usd, p.compare_price_inr, p.compare_price_usd, 
-                  p.price_inr as price, p.thumbnail, p.image_url, p.category_id,
+                  p.price_inr as price, p.weight, p.gst_percent, p.gst_rate, p.thumbnail, p.image_url, p.category_id,
                   c.name as category_name, c.slug as category_slug,
                   COALESCE(pr.review_count, 0) as review_count,
                   COALESCE(pr.review_count, 0) as total_reviews,
@@ -187,7 +187,7 @@ router.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res)
         const placeholders = excludeIds.map(() => '?').join(',');
         const more = await executeMySQL(
           `SELECT p.id, p.title, p.slug, p.price_inr, p.price_usd, p.compare_price_inr, p.compare_price_usd, 
-                  p.price_inr as price, p.thumbnail, p.image_url, p.category_id,
+                  p.price_inr as price, p.weight, p.gst_percent, p.gst_rate, p.thumbnail, p.image_url, p.category_id,
                   c.name as category_name, c.slug as category_slug,
                   COALESCE(pr.review_count, 0) as review_count,
                   COALESCE(pr.review_count, 0) as total_reviews,
@@ -218,7 +218,7 @@ router.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res)
       try {
         related = db.prepare(
           `SELECT p.id, p.title, p.slug, p.price_inr, p.price_usd, p.compare_price_inr, p.compare_price_usd, 
-                  p.price_inr as price, p.thumbnail, p.image_url, p.category_id,
+                  p.price_inr as price, p.weight, p.gst_percent, p.gst_rate, p.thumbnail, p.image_url, p.category_id,
                   c.name as category_name, c.slug as category_slug,
                   COALESCE(pr.review_count, 0) as review_count,
                   COALESCE(pr.review_count, 0) as total_reviews,
@@ -236,6 +236,25 @@ router.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res)
            ORDER BY p.id DESC 
            LIMIT 10`
         ).all(prod.id);
+      } catch (e) {}
+    }
+
+    if (Array.isArray(related) && related.length > 0) {
+      try {
+        const relIds = related.map(r => r.id);
+        const relIn = relIds.map(() => '?').join(',');
+        const relVariants = await executeMySQL(`SELECT * FROM product_variants WHERE product_id IN (${relIn}) ORDER BY id ASC`, relIds) || [];
+        related = related.map(r => {
+          const effGst = (r.gst_percent !== null && r.gst_percent !== undefined && r.gst_percent !== '')
+            ? Number(r.gst_percent)
+            : ((r.gst_rate !== null && r.gst_rate !== undefined && r.gst_rate !== '') ? Number(r.gst_rate) : null);
+          return {
+            ...r,
+            gst_percent: effGst,
+            gst_rate: effGst,
+            variants: relVariants.filter(v => v.product_id === r.id)
+          };
+        });
       } catch (e) {}
     }
 
