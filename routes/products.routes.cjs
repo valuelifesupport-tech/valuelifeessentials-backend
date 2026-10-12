@@ -600,7 +600,7 @@ router.post(['/api/products/:id/variants', '/api/variants'], requireAdminAuth, a
 });
 
 // DELETE Variant
-router.delete(['/api/variants/:id', '/api/products/variants/:id'], requireAdminAuth, async (req, res) => {
+router.delete(['/api/variants/:id', '/api/products/variants/:id', '/api/admin/variants/:id'], requireAdminAuth, async (req, res) => {
   try {
     const variantId = req.params.id;
     await executeMySQL('DELETE FROM product_variants WHERE id = ?', [variantId]);
@@ -608,6 +608,36 @@ router.delete(['/api/variants/:id', '/api/products/variants/:id'], requireAdminA
       db.prepare('DELETE FROM product_variants WHERE id = ?').run(variantId);
     } catch (e) {}
     res.json({ success: true, message: 'Variant deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Update Product Stock Inline
+router.put(['/api/products/:id/stock', '/api/admin/products/:id/stock'], requireAdminAuth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const stock = Math.max(0, Number(req.body?.stock) || 0);
+    await executeMySQL('UPDATE products SET stock = ? WHERE id = ?', [stock, id]);
+    try {
+      db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(stock, id);
+    } catch (e) {}
+    res.json({ success: true, id: Number(id), stock });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT Update Variant Stock Inline
+router.put(['/api/variants/:id/stock', '/api/products/variants/:id/stock', '/api/admin/variants/:id/stock'], requireAdminAuth, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const stock = Math.max(0, Number(req.body?.stock) || 0);
+    await executeMySQL('UPDATE product_variants SET stock = ? WHERE id = ?', [stock, id]);
+    try {
+      db.prepare('UPDATE product_variants SET stock = ? WHERE id = ?').run(stock, id);
+    } catch (e) {}
+    res.json({ success: true, id: Number(id), stock });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

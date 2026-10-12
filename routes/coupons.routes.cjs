@@ -4,7 +4,7 @@ const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // GET All Coupons
-router.get('/api/coupons', requireAdminAuth, async (req, res) => {
+router.get(['/api/coupons', '/api/admin/coupons'], requireAdminAuth, async (req, res) => {
   try {
     let rows = await executeMySQL('SELECT * FROM coupons ORDER BY id DESC');
     if (rows === null) {
@@ -21,7 +21,7 @@ router.get('/api/coupons', requireAdminAuth, async (req, res) => {
 });
 
 // POST Create Coupon
-router.post('/api/coupons', requireAdminAuth, async (req, res) => {
+router.post(['/api/coupons', '/api/admin/coupons'], requireAdminAuth, async (req, res) => {
   try {
     const data = req.body;
     let {
@@ -92,7 +92,7 @@ router.post('/api/coupons', requireAdminAuth, async (req, res) => {
 });
 
 // PUT Update Coupon
-router.put('/api/coupons/:id', requireAdminAuth, async (req, res) => {
+router.put(['/api/coupons/:id', '/api/admin/coupons/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const data = req.body;
@@ -288,7 +288,7 @@ router.post('/api/coupons/validate', async (req, res) => {
 });
 
 // DELETE Coupon
-router.delete('/api/coupons/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/coupons/:id', '/api/admin/coupons/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM coupons WHERE id = ?', [id]);

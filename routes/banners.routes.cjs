@@ -4,7 +4,7 @@ const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // GET Banners
-router.get('/api/banners', async (req, res) => {
+router.get(['/api/banners', '/api/admin/banners'], async (req, res) => {
   try {
     let rows = await executeMySQL('SELECT * FROM banners ORDER BY sort_order ASC, id ASC');
     if (!rows || rows.length === 0) {
@@ -17,7 +17,7 @@ router.get('/api/banners', async (req, res) => {
 });
 
 // POST Create Banner
-router.post('/api/banners', requireAdminAuth, async (req, res) => {
+router.post(['/api/banners', '/api/admin/banners'], requireAdminAuth, async (req, res) => {
   try {
     const { title, subtitle, image_url, link_url, button_text, background_color, sort_order = 0 } = req.body;
     if (!image_url) return res.status(400).json({ error: 'Banner image_url is required' });

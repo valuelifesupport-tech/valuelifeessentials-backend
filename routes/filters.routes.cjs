@@ -28,7 +28,7 @@ router.get(['/api/filter-groups', '/api/admin/filter-groups'], async (req, res) 
 });
 
 // POST Create Filter Group
-router.post('/api/admin/filter-groups', requireAdminAuth, async (req, res) => {
+router.post(['/api/admin/filter-groups', '/api/filter-groups'], requireAdminAuth, async (req, res) => {
   try {
     const { name, display_name, sort_order = 0 } = req.body;
     if (!name) return res.status(400).json({ error: 'Filter group name is required' });
@@ -51,7 +51,7 @@ router.post('/api/admin/filter-groups', requireAdminAuth, async (req, res) => {
 });
 
 // PUT Update Filter Group
-router.put('/api/admin/filter-groups/:id', requireAdminAuth, async (req, res) => {
+router.put(['/api/admin/filter-groups/:id', '/api/filter-groups/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const { name, display_name, sort_order } = req.body;
@@ -70,7 +70,7 @@ router.put('/api/admin/filter-groups/:id', requireAdminAuth, async (req, res) =>
 });
 
 // DELETE Filter Group
-router.delete('/api/admin/filter-groups/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/admin/filter-groups/:id', '/api/filter-groups/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM product_filter_options WHERE group_id = ?', [id]);
@@ -86,7 +86,7 @@ router.delete('/api/admin/filter-groups/:id', requireAdminAuth, async (req, res)
 });
 
 // POST Create Filter Option
-router.post('/api/admin/filter-options', requireAdminAuth, async (req, res) => {
+router.post(['/api/admin/filter-options', '/api/filter-options'], requireAdminAuth, async (req, res) => {
   try {
     const { group_id, label, value, sort_order = 0 } = req.body;
     if (!group_id || !label) return res.status(400).json({ error: 'group_id and label are required' });
@@ -110,7 +110,7 @@ router.post('/api/admin/filter-options', requireAdminAuth, async (req, res) => {
 });
 
 // DELETE Filter Option
-router.delete('/api/admin/filter-options/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/admin/filter-options/:id', '/api/filter-options/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM product_filter_options WHERE id = ?', [id]);

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db, executeMySQL } = require('../config/database.cjs');
+const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // POST /api/newsletter/subscribe
 router.post('/api/newsletter/subscribe', async (req, res) => {
@@ -39,16 +40,38 @@ router.post('/api/newsletter/subscribe', async (req, res) => {
 });
 
 // GET /api/admin/newsletter/subscribers (admin view)
-router.get('/api/admin/newsletter/subscribers', async (req, res) => {
+router.get(['/api/admin/newsletter/subscribers', '/api/newsletter/subscribers'], async (req, res) => {
   try {
-    let rows;
+    let rows = [];
     try {
-      const [mysqlRows] = await executeMySQL('SELECT * FROM newsletter_subscribers ORDER BY created_at DESC');
-      rows = mysqlRows;
+      const mysqlRows = await executeMySQL('SELECT * FROM newsletter_subscribers ORDER BY created_at DESC');
+      if (Array.isArray(mysqlRows) && mysqlRows.length > 0) {
+        rows = mysqlRows;
+      } else {
+        rows = db.prepare('SELECT * FROM newsletter_subscribers ORDER BY created_at DESC').all() || [];
+      }
     } catch (e) {
-      rows = db.prepare('SELECT * FROM newsletter_subscribers ORDER BY created_at DESC').all();
+      try {
+        rows = db.prepare('SELECT * FROM newsletter_subscribers ORDER BY created_at DESC').all() || [];
+      } catch (err) {}
     }
-    res.json(rows || []);
+    res.json(Array.isArray(rows) ? rows : []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/admin/newsletter/subscribers/:id
+router.delete(['/api/admin/newsletter/subscribers/:id', '/api/newsletter/subscribers/:id'], requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    try {
+      await executeMySQL('DELETE FROM newsletter_subscribers WHERE id = ?', [id]);
+    } catch (e) {}
+    try {
+      db.prepare('DELETE FROM newsletter_subscribers WHERE id = ?').run(id);
+    } catch (e) {}
+    res.json({ success: true, message: 'Subscriber removed' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

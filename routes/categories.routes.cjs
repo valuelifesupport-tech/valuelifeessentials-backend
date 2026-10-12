@@ -11,7 +11,7 @@ function generateSlug(text) {
 }
 
 // GET All Categories with Subcategories
-router.get(['/api/categories', '/api/categories/tree'], async (req, res) => {
+router.get(['/api/categories', '/api/categories/tree', '/api/admin/categories'], async (req, res) => {
   try {
     // 1. MySQL Priority
     const myCats = await executeMySQL('SELECT * FROM categories ORDER BY id ASC');
@@ -37,8 +37,25 @@ router.get(['/api/categories', '/api/categories/tree'], async (req, res) => {
   }
 });
 
+// GET All Subcategories
+router.get(['/api/subcategories', '/api/admin/subcategories'], async (req, res) => {
+  try {
+    let subs = await executeMySQL('SELECT * FROM subcategories ORDER BY id ASC');
+    if (!subs || subs.length === 0) {
+      try {
+        subs = db.prepare('SELECT * FROM subcategories ORDER BY id ASC').all() || [];
+      } catch (e) {
+        subs = [];
+      }
+    }
+    res.json(subs || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST Create Category
-router.post('/api/categories', requireAdminAuth, async (req, res) => {
+router.post(['/api/categories', '/api/admin/categories'], requireAdminAuth, async (req, res) => {
   try {
     const { name, icon, image_url, description, sort_order = 0 } = req.body;
     if (!name) return res.status(400).json({ error: 'Category name is required' });
@@ -87,7 +104,7 @@ router.post('/api/categories', requireAdminAuth, async (req, res) => {
 });
 
 // PUT Update Category
-router.put('/api/categories/:id', requireAdminAuth, async (req, res) => {
+router.put(['/api/categories/:id', '/api/admin/categories/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const { name, icon, image_url, description, sort_order = 0 } = req.body;
@@ -122,7 +139,7 @@ router.put('/api/categories/:id', requireAdminAuth, async (req, res) => {
 });
 
 // DELETE Category
-router.delete('/api/categories/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/categories/:id', '/api/admin/categories/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM subcategories WHERE category_id = ?', [id]);
@@ -140,7 +157,7 @@ router.delete('/api/categories/:id', requireAdminAuth, async (req, res) => {
 });
 
 // POST Create Subcategory
-router.post('/api/subcategories', requireAdminAuth, async (req, res) => {
+router.post(['/api/subcategories', '/api/admin/subcategories'], requireAdminAuth, async (req, res) => {
   try {
     const { category_id, name, sort_order = 0 } = req.body;
     if (!category_id || !name) return res.status(400).json({ error: 'category_id and name are required' });
@@ -164,7 +181,7 @@ router.post('/api/subcategories', requireAdminAuth, async (req, res) => {
 });
 
 // PUT Update Subcategory
-router.put('/api/subcategories/:id', requireAdminAuth, async (req, res) => {
+router.put(['/api/subcategories/:id', '/api/admin/subcategories/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const { name, sort_order = 0 } = req.body;
@@ -187,7 +204,7 @@ router.put('/api/subcategories/:id', requireAdminAuth, async (req, res) => {
 });
 
 // DELETE Subcategory
-router.delete('/api/subcategories/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/subcategories/:id', '/api/admin/subcategories/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM subcategories WHERE id = ?', [id]);

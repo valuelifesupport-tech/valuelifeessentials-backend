@@ -4,11 +4,11 @@ const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // GET All Published Pages
-router.get('/api/pages', async (req, res) => {
+router.get(['/api/pages', '/api/admin/pages'], async (req, res) => {
   try {
-    let rows = await executeMySQL('SELECT * FROM custom_pages WHERE is_published = 1 ORDER BY title ASC');
+    let rows = await executeMySQL('SELECT * FROM custom_pages ORDER BY title ASC');
     if (!rows || rows.length === 0) {
-      rows = db.prepare('SELECT * FROM custom_pages WHERE is_published = 1 ORDER BY title ASC').all() || [];
+      rows = db.prepare('SELECT * FROM custom_pages ORDER BY title ASC').all() || [];
     }
     // Normalize content field
     rows = rows.map(r => ({
@@ -360,7 +360,7 @@ router.get('/api/admin/inquiries', requireAdminAuth, async (req, res) => {
 });
 
 // POST Create Custom Page
-router.post('/api/admin/pages', requireAdminAuth, async (req, res) => {
+router.post(['/api/admin/pages', '/api/pages'], requireAdminAuth, async (req, res) => {
   try {
     const { title, slug, content, is_published = 1, meta_title, meta_description } = req.body;
     if (!title || !slug) return res.status(400).json({ error: 'Title and slug are required' });
@@ -383,7 +383,7 @@ router.post('/api/admin/pages', requireAdminAuth, async (req, res) => {
 });
 
 // PUT Update Custom Page
-router.put('/api/admin/pages/:id', requireAdminAuth, async (req, res) => {
+router.put(['/api/admin/pages/:id', '/api/pages/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const { title, slug, content, is_published, meta_title, meta_description } = req.body;
@@ -405,7 +405,7 @@ router.put('/api/admin/pages/:id', requireAdminAuth, async (req, res) => {
 });
 
 // DELETE Custom Page
-router.delete('/api/admin/pages/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/admin/pages/:id', '/api/pages/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM custom_pages WHERE id = ?', [id]);

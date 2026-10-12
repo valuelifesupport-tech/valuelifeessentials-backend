@@ -42,7 +42,7 @@ function requireAdminAuth(req, res, next) {
   if (authHeader) {
     token = authHeader.replace(/^Bearer\s+/i, '').trim();
   } else {
-    token = req.headers['x-admin-token'] || req.headers['x-admin-key'] || req.query?.admin_token;
+    token = req.headers['x-admin-token'] || req.headers['x-admin-key'] || req.query?.token || req.query?.admin_token;
   }
 
   if (token && activeAdminTokens.has(token)) {

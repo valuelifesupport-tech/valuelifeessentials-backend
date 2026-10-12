@@ -328,7 +328,7 @@ router.get('/api/admin/gst-report/summary', requireAdminAuth, async (req, res) =
 });
 
 // GET CA-Compliant GST Register Export CSV (Sales & Returns)
-router.get('/api/admin/gst-report/export', requireAdminAuth, async (req, res) => {
+router.get(['/api/admin/gst-report/export', '/api/admin/gst-report/csv'], requireAdminAuth, async (req, res) => {
   try {
     const { month = 'ALL', type = 'ALL' } = req.query;
     let rows = await executeMySQL('SELECT * FROM orders ORDER BY id DESC');

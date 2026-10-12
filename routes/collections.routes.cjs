@@ -11,7 +11,7 @@ function generateSlug(text) {
 }
 
 // GET All Collections
-router.get('/api/collections', async (req, res) => {
+router.get(['/api/collections', '/api/admin/collections'], async (req, res) => {
   try {
     let collections = await executeMySQL('SELECT * FROM collections ORDER BY id ASC');
     if (!collections || collections.length === 0) {
@@ -37,7 +37,7 @@ router.get('/api/collections', async (req, res) => {
 });
 
 // POST Create Collection
-router.post('/api/collections', requireAdminAuth, async (req, res) => {
+router.post(['/api/collections', '/api/admin/collections'], requireAdminAuth, async (req, res) => {
   try {
     const { name, description, image_url, show_in_navbar = 0, sort_order = 0, product_ids = [] } = req.body;
     if (!name) return res.status(400).json({ error: 'Collection name is required' });
@@ -71,7 +71,7 @@ router.post('/api/collections', requireAdminAuth, async (req, res) => {
 });
 
 // PUT Update Collection
-router.put('/api/collections/:id', requireAdminAuth, async (req, res) => {
+router.put(['/api/collections/:id', '/api/admin/collections/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const { name, description, image_url, show_in_navbar, sort_order, product_ids } = req.body;
@@ -124,7 +124,7 @@ router.put(['/api/collections/:id/navbar-toggle', '/api/admin/collections/:id/na
 });
 
 // DELETE Collection
-router.delete('/api/collections/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/collections/:id', '/api/admin/collections/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     await executeMySQL('DELETE FROM product_collections WHERE collection_id = ?', [id]);

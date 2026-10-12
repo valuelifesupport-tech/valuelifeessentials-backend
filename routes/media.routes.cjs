@@ -70,7 +70,7 @@ router.post('/api/upload', requireAdminAuth, (req, res) => {
 });
 
 // List Media Files
-router.get('/api/media', async (req, res) => {
+router.get(['/api/media', '/api/admin/media'], async (req, res) => {
   try {
     const files = fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : [];
     const mediaList = files
@@ -93,7 +93,7 @@ router.get('/api/media', async (req, res) => {
 });
 
 // Delete Media File
-router.delete('/api/media/:filename', requireAdminAuth, async (req, res) => {
+router.delete(['/api/media/:filename', '/api/admin/media/:filename'], requireAdminAuth, async (req, res) => {
   try {
     const filename = path.basename(req.params.filename);
     const filePath = path.join(uploadsDir, filename);
@@ -116,7 +116,7 @@ router.delete('/api/media/:filename', requireAdminAuth, async (req, res) => {
 });
 
 // Replace Media File
-router.post('/api/media/replace', requireAdminAuth, upload.single('file'), async (req, res) => {
+router.post(['/api/media/replace', '/api/admin/media/replace'], requireAdminAuth, upload.single('file'), async (req, res) => {
   try {
     const targetFilename = req.body.targetFilename;
     if (!targetFilename || !req.file) {

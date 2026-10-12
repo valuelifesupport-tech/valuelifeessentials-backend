@@ -53,7 +53,7 @@ function sanitizeKeys(fields, allowedSet) {
 }
 
 // GET Store Settings
-router.get('/api/settings', async (req, res) => {
+router.get(['/api/settings', '/api/admin/settings'], async (req, res) => {
   try {
     const myRows = await executeMySQL('SELECT * FROM store_settings WHERE id = 1');
     if (myRows && myRows.length > 0) {
@@ -82,7 +82,7 @@ router.get('/api/settings', async (req, res) => {
 });
 
 // PUT Update Store Settings
-router.put('/api/settings', requireAdminAuth, async (req, res) => {
+router.put(['/api/settings', '/api/admin/settings'], requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
     const keys = sanitizeKeys(fields, ALLOWED_SETTINGS_COLS);
@@ -141,7 +141,7 @@ router.get(['/api/hero-config', '/api/admin/hero-config'], async (req, res) => {
 });
 
 // PUT Hero Config
-router.put('/api/admin/hero-config', requireAdminAuth, async (req, res) => {
+router.put(['/api/admin/hero-config', '/api/hero-config'], requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
     const keys = sanitizeKeys(fields, ALLOWED_HERO_COLS);
@@ -170,7 +170,7 @@ router.put('/api/admin/hero-config', requireAdminAuth, async (req, res) => {
 });
 
 // GET Theme Config
-router.get('/api/theme-config', async (req, res) => {
+router.get(['/api/theme-config', '/api/admin/theme-config'], async (req, res) => {
   try {
     let row = await executeMySQL('SELECT * FROM store_theme_config WHERE id = 1');
     if (row && row.length > 0) return res.json(row[0]);
@@ -187,7 +187,7 @@ router.get('/api/theme-config', async (req, res) => {
 });
 
 // PUT Theme Config
-router.put('/api/admin/theme-config', requireAdminAuth, async (req, res) => {
+router.put(['/api/admin/theme-config', '/api/theme-config'], requireAdminAuth, async (req, res) => {
   try {
     const fields = req.body;
     const keys = sanitizeKeys(fields, ALLOWED_THEME_COLS);
@@ -261,28 +261,49 @@ router.put(['/api/sections-config', '/api/admin/sections-config'], requireAdminA
 });
 
 // GET State Taxes
-router.get('/api/admin/taxes/states', requireAdminAuth, async (req, res) => {
+router.get(['/api/admin/taxes/states', '/api/taxes/states'], requireAdminAuth, async (req, res) => {
   try {
     let rows = await executeMySQL('SELECT * FROM state_tax_rates ORDER BY state_name ASC');
     if (!rows || rows.length === 0) {
-      rows = db.prepare('SELECT * FROM state_tax_rates ORDER BY state_name ASC').all() || [];
+      try {
+        rows = db.prepare('SELECT * FROM state_tax_rates ORDER BY state_name ASC').all() || [];
+      } catch (e) {
+        rows = [];
+      }
     }
-    res.json(rows);
+    res.json(rows || []);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // PUT State Taxes
-router.put('/api/admin/taxes/states', requireAdminAuth, async (req, res) => {
+router.put(['/api/admin/taxes/states', '/api/taxes/states'], requireAdminAuth, async (req, res) => {
   try {
-    const { states } = req.body;
-    if (Array.isArray(states)) {
-      for (const st of states) {
-        await executeMySQL('UPDATE state_tax_rates SET tax_rate = ?, tax_label = ? WHERE id = ?', [st.tax_rate, st.tax_label, st.id]);
+    const list = Array.isArray(req.body?.states)
+      ? req.body.states
+      : (Array.isArray(req.body?.rates) ? req.body.rates : (Array.isArray(req.body) ? req.body : []));
+
+    try { await executeMySQL('ALTER TABLE state_tax_rates ADD COLUMN tax_label VARCHAR(50) DEFAULT "IGST"'); } catch (e) {}
+    try { await executeMySQL('ALTER TABLE state_tax_rates ADD COLUMN tax_rule VARCHAR(50) DEFAULT "INSTEAD_OF_FEDERAL"'); } catch (e) {}
+
+    for (const st of list) {
+      const rate = Number(st.tax_rate) || 0;
+      const label = st.tax_label || 'IGST';
+      const rule = st.tax_rule || 'INSTEAD_OF_FEDERAL';
+      const updated = await executeMySQL(
+        'UPDATE state_tax_rates SET tax_rate = ?, tax_label = ?, tax_rule = ? WHERE id = ?',
+        [rate, label, rule, st.id]
+      );
+      if (updated === null) {
+        await executeMySQL('UPDATE state_tax_rates SET tax_rate = ? WHERE id = ?', [rate, st.id]);
+      }
+      try {
+        db.prepare('UPDATE state_tax_rates SET tax_rate = ?, tax_label = ? WHERE id = ?').run(rate, label, st.id);
+      } catch (e) {
         try {
-          db.prepare('UPDATE state_tax_rates SET tax_rate = ?, tax_label = ? WHERE id = ?').run(st.tax_rate, st.tax_label, st.id);
-        } catch (e) {}
+          db.prepare('UPDATE state_tax_rates SET tax_rate = ? WHERE id = ?').run(rate, st.id);
+        } catch (e2) {}
       }
     }
     res.json({ success: true });
@@ -292,39 +313,91 @@ router.put('/api/admin/taxes/states', requireAdminAuth, async (req, res) => {
 });
 
 // Reset State Taxes
-router.post('/api/admin/taxes/states/reset', requireAdminAuth, async (req, res) => {
-  res.json({ success: true, message: 'Tax rates reset to standards' });
+router.post(['/api/admin/taxes/states/reset', '/api/taxes/states/reset'], requireAdminAuth, async (req, res) => {
+  try {
+    await executeMySQL('UPDATE state_tax_rates SET tax_rate = 18.0');
+    try {
+      db.prepare('UPDATE state_tax_rates SET tax_rate = 18.0').run();
+    } catch (e) {}
+    res.json({ success: true, message: 'Tax rates reset to standards' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET Collection Tax Overrides
-router.get('/api/admin/taxes/overrides', requireAdminAuth, async (req, res) => {
+router.get(['/api/admin/taxes/overrides', '/api/taxes/overrides'], requireAdminAuth, async (req, res) => {
   try {
-    const rows = await executeMySQL(`
+    let rows = await executeMySQL(`
       SELECT cto.*, c.name as collection_name
       FROM collection_tax_overrides cto
       LEFT JOIN collections c ON cto.collection_id = c.id
-    `) || [];
-    res.json(rows);
+      ORDER BY cto.id DESC
+    `);
+    if (!rows || rows.length === 0) {
+      try {
+        rows = db.prepare(`
+          SELECT cto.*, c.name as collection_name
+          FROM collection_tax_overrides cto
+          LEFT JOIN collections c ON cto.collection_id = c.id
+          ORDER BY cto.id DESC
+        `).all() || [];
+      } catch (e) {
+        rows = [];
+      }
+    }
+    const normalized = (rows || []).map(r => ({
+      ...r,
+      title: r.title || r.reason || 'Collection Tax Override',
+      tax_rate: r.tax_rate !== undefined && r.tax_rate !== null ? Number(r.tax_rate) : Number(r.override_tax_rate || 0),
+      state_name: r.state_name || 'ALL'
+    }));
+    res.json(normalized);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // POST Collection Tax Override
-router.post('/api/admin/taxes/overrides', requireAdminAuth, async (req, res) => {
+router.post(['/api/admin/taxes/overrides', '/api/taxes/overrides'], requireAdminAuth, async (req, res) => {
   try {
-    const { collection_id, override_tax_rate, reason } = req.body;
-    await executeMySQL('INSERT INTO collection_tax_overrides (collection_id, override_tax_rate, reason) VALUES (?, ?, ?)', [collection_id, override_tax_rate, reason || '']);
-    res.json({ success: true });
+    const { title, collection_id, tax_rate, override_tax_rate, state_name, reason } = req.body;
+    const finalRate = tax_rate !== undefined ? Number(tax_rate) : Number(override_tax_rate || 0);
+    const finalTitle = title || reason || 'Collection Tax Override';
+    const finalState = state_name || 'ALL';
+
+    try { await executeMySQL('ALTER TABLE collection_tax_overrides ADD COLUMN title VARCHAR(255)'); } catch (e) {}
+
+    let myRes = await executeMySQL(
+      'INSERT INTO collection_tax_overrides (title, collection_id, tax_rate, state_name) VALUES (?, ?, ?, ?)',
+      [finalTitle, collection_id, finalRate, finalState]
+    );
+    if (myRes === null) {
+      myRes = await executeMySQL(
+        'INSERT INTO collection_tax_overrides (collection_id, tax_rate, state_name) VALUES (?, ?, ?)',
+        [collection_id, finalRate, finalState]
+      );
+    }
+    const newId = myRes && myRes.insertId ? myRes.insertId : Date.now();
+
+    try {
+      db.prepare('INSERT OR REPLACE INTO collection_tax_overrides (id, title, collection_id, tax_rate, state_name) VALUES (?, ?, ?, ?, ?)')
+        .run(newId, finalTitle, collection_id, finalRate, finalState);
+    } catch (e) {}
+
+    res.json({ success: true, id: newId, title: finalTitle, collection_id, tax_rate: finalRate, state_name: finalState });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // DELETE Collection Tax Override
-router.delete('/api/admin/taxes/overrides/:id', requireAdminAuth, async (req, res) => {
+router.delete(['/api/admin/taxes/overrides/:id', '/api/taxes/overrides/:id'], requireAdminAuth, async (req, res) => {
   try {
     await executeMySQL('DELETE FROM collection_tax_overrides WHERE id = ?', [req.params.id]);
+    try {
+      db.prepare('DELETE FROM collection_tax_overrides WHERE id = ?').run(req.params.id);
+    } catch (e) {}
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
