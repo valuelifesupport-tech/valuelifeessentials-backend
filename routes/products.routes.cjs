@@ -21,9 +21,19 @@ router.get('/api/products', async (req, res) => {
         p.title as name,
         p.price_inr as price,
         p.stock as stock_quantity,
-        c.name as category_name, c.slug as category_slug
+        c.name as category_name, c.slug as category_slug,
+        COALESCE(pr.review_count, 0) as review_count,
+        COALESCE(pr.review_count, 0) as total_reviews,
+        COALESCE(ROUND(pr.avg_rating, 1), 0.0) as rating,
+        COALESCE(ROUND(pr.avg_rating, 1), 0.0) as avg_rating
       FROM products p
       LEFT JOIN categories c ON p.category_id = c.id
+      LEFT JOIN (
+        SELECT product_id, COUNT(*) as review_count, AVG(rating) as avg_rating 
+        FROM product_reviews 
+        WHERE status = 'APPROVED' 
+        GROUP BY product_id
+      ) pr ON p.id = pr.product_id
       WHERE 1=1
     `;
     const params = [];
@@ -133,13 +143,104 @@ router.get(['/api/products/slug/:slug', '/api/products/:slug'], async (req, res)
     }));
     prod.reviews = normalizedReviews;
     prod.review_count = normalizedReviews.length;
-    prod.rating = normalizedReviews.length > 0 ? (normalizedReviews.reduce((s, r) => s + (Number(r.rating) || 5), 0) / normalizedReviews.length) : 5.0;
+    prod.total_reviews = normalizedReviews.length;
+    prod.avg_rating = normalizedReviews.length > 0 
+      ? Number((normalizedReviews.reduce((s, r) => s + (Number(r.rating) || 5), 0) / normalizedReviews.length).toFixed(1)) 
+      : 0.0;
+    prod.rating = prod.avg_rating;
+    prod.ratingStats = { cnt: normalizedReviews.length, total_reviews: normalizedReviews.length, avg_rating: prod.avg_rating };
 
     const effectiveSlugGst = (prod.gst_percent !== null && prod.gst_percent !== undefined && prod.gst_percent !== '')
       ? Number(prod.gst_percent)
       : ((prod.gst_rate !== null && prod.gst_rate !== undefined && prod.gst_rate !== '') ? Number(prod.gst_rate) : null);
     prod.gst_percent = effectiveSlugGst;
     prod.gst_rate = effectiveSlugGst;
+
+    // Fetch Related / Suggested Products with real reviews & ratings
+    let related = [];
+    try {
+      if (prod.category_id) {
+        related = await executeMySQL(
+          `SELECT p.id, p.title, p.slug, p.price_inr, p.price_usd, p.compare_price_inr, p.compare_price_usd, 
+                  p.price_inr as price, p.thumbnail, p.image_url, p.category_id,
+                  c.name as category_name, c.slug as category_slug,
+                  COALESCE(pr.review_count, 0) as review_count,
+                  COALESCE(pr.review_count, 0) as total_reviews,
+                  COALESCE(ROUND(pr.avg_rating, 1), 0.0) as rating,
+                  COALESCE(ROUND(pr.avg_rating, 1), 0.0) as avg_rating
+           FROM products p 
+           LEFT JOIN categories c ON p.category_id = c.id 
+           LEFT JOIN (
+             SELECT product_id, COUNT(*) as review_count, AVG(rating) as avg_rating 
+             FROM product_reviews 
+             WHERE status = 'APPROVED' 
+             GROUP BY product_id
+           ) pr ON p.id = pr.product_id
+           WHERE p.id != ? AND p.category_id = ? AND (p.status = 'ACTIVE' OR p.status = 'active' OR p.status IS NULL)
+           ORDER BY p.id DESC 
+           LIMIT 10`,
+          [prod.id, prod.category_id]
+        );
+      }
+      if (!related || related.length < 4) {
+        const excludeIds = [prod.id, ...(related || []).map(r => r.id)];
+        const placeholders = excludeIds.map(() => '?').join(',');
+        const more = await executeMySQL(
+          `SELECT p.id, p.title, p.slug, p.price_inr, p.price_usd, p.compare_price_inr, p.compare_price_usd, 
+                  p.price_inr as price, p.thumbnail, p.image_url, p.category_id,
+                  c.name as category_name, c.slug as category_slug,
+                  COALESCE(pr.review_count, 0) as review_count,
+                  COALESCE(pr.review_count, 0) as total_reviews,
+                  COALESCE(ROUND(pr.avg_rating, 1), 0.0) as rating,
+                  COALESCE(ROUND(pr.avg_rating, 1), 0.0) as avg_rating
+           FROM products p 
+           LEFT JOIN categories c ON p.category_id = c.id 
+           LEFT JOIN (
+             SELECT product_id, COUNT(*) as review_count, AVG(rating) as avg_rating 
+             FROM product_reviews 
+             WHERE status = 'APPROVED' 
+             GROUP BY product_id
+           ) pr ON p.id = pr.product_id
+           WHERE p.id NOT IN (${placeholders}) AND (p.status = 'ACTIVE' OR p.status = 'active' OR p.status IS NULL)
+           ORDER BY p.id DESC 
+           LIMIT ?`,
+          [...excludeIds, 10 - (related ? related.length : 0)]
+        );
+        if (more && more.length > 0) {
+          related = [...(related || []), ...more];
+        }
+      }
+    } catch (e) {
+      console.error('MySQL related products error:', e.message);
+    }
+
+    if (!related || related.length === 0) {
+      try {
+        related = db.prepare(
+          `SELECT p.id, p.title, p.slug, p.price_inr, p.price_usd, p.compare_price_inr, p.compare_price_usd, 
+                  p.price_inr as price, p.thumbnail, p.image_url, p.category_id,
+                  c.name as category_name, c.slug as category_slug,
+                  COALESCE(pr.review_count, 0) as review_count,
+                  COALESCE(pr.review_count, 0) as total_reviews,
+                  COALESCE(ROUND(pr.avg_rating, 1), 0.0) as rating,
+                  COALESCE(ROUND(pr.avg_rating, 1), 0.0) as avg_rating
+           FROM products p 
+           LEFT JOIN categories c ON p.category_id = c.id 
+           LEFT JOIN (
+             SELECT product_id, COUNT(*) as review_count, AVG(rating) as avg_rating 
+             FROM product_reviews 
+             WHERE status = 'APPROVED' 
+             GROUP BY product_id
+           ) pr ON p.id = pr.product_id
+           WHERE p.id != ? AND (p.status = 'ACTIVE' OR p.status = 'active' OR p.status IS NULL)
+           ORDER BY p.id DESC 
+           LIMIT 10`
+        ).all(prod.id);
+      } catch (e) {}
+    }
+
+    prod.related_products = related || [];
+    prod.frequently_bought_products = related || [];
 
     res.json(prod);
   } catch (err) {

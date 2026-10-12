@@ -421,6 +421,10 @@ async function setupHostingerMySQL() {
         script_quote VARCHAR(255) DEFAULT 'Good Products, Brighter Days.',
         sort_order INT DEFAULT 0,
         is_active INT DEFAULT 1,
+        slide_type VARCHAR(50) DEFAULT 'SPLIT',
+        banner_img TEXT,
+        mobile_banner_img TEXT,
+        show_overlay_text INT DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -707,6 +711,31 @@ async function setupHostingerMySQL() {
     ];
     for (const c of reviewCols) {
       try { await connection.query('ALTER TABLE product_reviews ' + c); } catch (e) {}
+    }
+
+    // Coupons missing columns
+    const couponCols = [
+      "ADD COLUMN IF NOT EXISTS min_spend DECIMAL(10,2) DEFAULT 0",
+      "ADD COLUMN IF NOT EXISTS max_discount DECIMAL(10,2) DEFAULT NULL",
+      "ADD COLUMN IF NOT EXISTS usage_limit INT DEFAULT NULL",
+      "ADD COLUMN IF NOT EXISTS used_count INT DEFAULT 0",
+      "ADD COLUMN IF NOT EXISTS applies_to VARCHAR(50) DEFAULT 'ALL'",
+      "ADD COLUMN IF NOT EXISTS specific_ids TEXT DEFAULT '[]'",
+      "ADD COLUMN IF NOT EXISTS coupon_category VARCHAR(50) DEFAULT 'amount_off_order'",
+      "ADD COLUMN IF NOT EXISTS free_shipping INT DEFAULT 0",
+      "ADD COLUMN IF NOT EXISTS description TEXT DEFAULT NULL",
+      "ADD COLUMN IF NOT EXISTS start_date DATETIME DEFAULT NULL",
+      "ADD COLUMN IF NOT EXISTS end_date DATETIME DEFAULT NULL",
+      "ADD COLUMN IF NOT EXISTS max_uses INT DEFAULT NULL",
+      "ADD COLUMN IF NOT EXISTS one_per_customer INT DEFAULT 0",
+      "ADD COLUMN IF NOT EXISTS buy_qty INT DEFAULT 1",
+      "ADD COLUMN IF NOT EXISTS get_qty INT DEFAULT 1",
+      "ADD COLUMN IF NOT EXISTS get_discount_type VARCHAR(20) DEFAULT 'FREE'",
+      "ADD COLUMN IF NOT EXISTS applies_to_type VARCHAR(50) DEFAULT 'all'",
+      "ADD COLUMN IF NOT EXISTS target_ids TEXT DEFAULT '[]'"
+    ];
+    for (const c of couponCols) {
+      try { await connection.query('ALTER TABLE coupons ' + c); } catch (e) {}
     }
 
     // R2-Newsletter: Create newsletter_subscribers table

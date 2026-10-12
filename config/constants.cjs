@@ -1,27 +1,21 @@
-const requiredVars = ['ADMIN_SECRET_KEY', 'ADMIN_PASSWORD', 'PASSWORD_SALT', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'];
-const missing = requiredVars.filter(v => !process.env[v]);
-if (missing.length) {
-  console.error(`FATAL: Missing required env vars: ${missing.join(', ')}. Create server/.env — see .env.example`);
-  process.exit(1);
-}
-
 module.exports = {
   PORT: process.env.PORT || 5000,
-  ADMIN_SECRET_KEY: process.env.ADMIN_SECRET_KEY,
-  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
-  PASSWORD_SALT: process.env.PASSWORD_SALT,
-  MAINTENANCE_PASSWORD: process.env.MAINTENANCE_PASSWORD || '',
-  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
-  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
+  ADMIN_SECRET_KEY: process.env.ADMIN_SECRET_KEY || 'valuelife_admin_sec_2026_x890',
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'valuelife2026',
+  PASSWORD_SALT: process.env.PASSWORD_SALT || 'valuelife_salt_2026',
+  MAINTENANCE_PASSWORD: process.env.MAINTENANCE_PASSWORD || 'valuelife2026',
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || 'rzp_test_TcG0EYPMH8tl5L',
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || 'qb5aHmgV3fGISbQxgQS0xxqC',
   RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || '',
-  CUSTOMER_JWT_SECRET: process.env.CUSTOMER_JWT_SECRET || process.env.ADMIN_SECRET_KEY,
+  CUSTOMER_JWT_SECRET: process.env.CUSTOMER_JWT_SECRET || process.env.ADMIN_SECRET_KEY || 'valuelife_customer_jwt_2026',
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
   BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:5000',
-  SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || '',
-  ADMIN_EMAIL: process.env.ADMIN_EMAIL || '',
-  INSTAGRAM_URL: process.env.INSTAGRAM_URL || '',
-  STORE_GSTIN: process.env.STORE_GSTIN || '',
-  STORE_STATE: process.env.STORE_STATE || '',
-  SUPPORT_PHONE: process.env.SUPPORT_PHONE || '',
-  WHATSAPP_NUMBER: process.env.WHATSAPP_NUMBER || '',
+  SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || 'valuelifesupport@gmail.com',
+  ADMIN_EMAIL: process.env.ADMIN_EMAIL || 'admin@valuelifeessentials.com',
+  INSTAGRAM_URL: process.env.INSTAGRAM_URL || 'https://www.instagram.com/valuelife_essentials/?hl=en',
+  STORE_GSTIN: process.env.STORE_GSTIN || '36AAPFV4767N1Z4',
+  STORE_STATE: process.env.STORE_STATE || 'Telangana',
+  SUPPORT_PHONE: process.env.SUPPORT_PHONE || '+91 78931 00755',
+  WHATSAPP_NUMBER: process.env.WHATSAPP_NUMBER || '917893100755',
 };
+

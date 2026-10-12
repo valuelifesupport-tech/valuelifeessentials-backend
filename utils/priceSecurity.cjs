@@ -233,17 +233,29 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
       if (couponRows && couponRows.length > 0) {
         const cpn = couponRows[0];
         const isNotExpired = !cpn.expiry_date || new Date(cpn.expiry_date) >= new Date();
-        const minAmount = Number(cpn.min_order_amount || 0);
+        const minAmount = Number(cpn.min_order_amount || cpn.min_spend || 0);
 
         if (isNotExpired && verifiedSubtotal >= minAmount) {
           appliedCouponCode = cpn.code;
           const val = Number(cpn.discount_value || 0);
-          if (cpn.discount_type === 'PERCENT' || cpn.discount_type === 'percentage' || cpn.discount_type === 'PERCENTAGE') {
+          const type = (cpn.discount_type || '').toUpperCase();
+          if (type === 'PERCENT' || type === 'PERCENTAGE') {
             verifiedDiscount = Math.round((verifiedSubtotal * val) / 100);
+            if (cpn.max_discount > 0 && verifiedDiscount > cpn.max_discount) {
+              verifiedDiscount = cpn.max_discount;
+            }
           } else {
             // Flat amount discount
             verifiedDiscount = Math.min(verifiedSubtotal, val);
           }
+
+          if (cpn.free_shipping == 1 || cpn.coupon_category === 'free_shipping') {
+            storeShippingFee = 0;
+            enableFreeShipping = 1;
+            storeFreeShippingThreshold = 0;
+          }
+
+          await executeMySQL('UPDATE coupons SET used_count = COALESCE(used_count, 0) + 1 WHERE id = ?', [cpn.id]);
         }
       }
     } catch (cErr) {

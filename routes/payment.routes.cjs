@@ -282,6 +282,7 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
 
       let hasAuthMatch = false;
       if (req.isAdmin) hasAuthMatch = true;
+      if (transaction_id && existingTxn.transaction_id === transaction_id) hasAuthMatch = true;
       if (txnEmail && txnEmail === reqEmail) hasAuthMatch = true;
       if (txnUserId && txnUserId === reqUserId) hasAuthMatch = true;
 

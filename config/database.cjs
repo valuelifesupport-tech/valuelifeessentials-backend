@@ -6,7 +6,8 @@ async function executeMySQL(sql, params = []) {
   try {
     const pool = getMySQLPool();
     if (!pool) return null;
-    const queryPromise = pool.query(sql, params);
+    const sanitizedParams = (Array.isArray(params) ? params : []).map(p => p === undefined ? null : p);
+    const queryPromise = pool.query(sql, sanitizedParams);
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MySQL Query Timeout')), 2500));
     const [result] = await Promise.race([queryPromise, timeoutPromise]);
     return result;

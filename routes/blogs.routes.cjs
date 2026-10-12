@@ -49,7 +49,7 @@ router.get('/api/blogs', async (req, res) => {
     let rows = await executeMySQL(sql, params);
 
     // Fallback to SQLite if MySQL fails
-    if (!rows || rows.length === 0) {
+    if (rows === null) {
       try {
         let sqliteSql = 'SELECT * FROM blog_posts WHERE is_published = 1';
         const sqliteParams = [];
@@ -83,7 +83,7 @@ router.get('/api/blogs/categories', async (req, res) => {
     let rows = await executeMySQL(
       'SELECT category, COUNT(*) as count FROM blog_posts WHERE is_published = 1 GROUP BY category ORDER BY count DESC'
     );
-    if (!rows || rows.length === 0) {
+    if (rows === null) {
       try {
         rows = db.prepare('SELECT category, COUNT(*) as count FROM blog_posts WHERE is_published = 1 GROUP BY category ORDER BY count DESC').all() || [];
       } catch (e) {}
@@ -161,7 +161,7 @@ router.get('/api/blogs/:slugOrId', async (req, res) => {
 router.get(['/api/admin/blogs', '/api/admin/blog-posts'], requireAdminAuth, async (req, res) => {
   try {
     let rows = await executeMySQL('SELECT * FROM blog_posts ORDER BY sort_order ASC, created_at DESC');
-    if (!rows || rows.length === 0) {
+    if (rows === null) {
       try {
         rows = db.prepare('SELECT * FROM blog_posts ORDER BY sort_order ASC, created_at DESC').all() || [];
       } catch (e) {}

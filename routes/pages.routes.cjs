@@ -69,7 +69,7 @@ router.get('/api/pages/:slug', async (req, res) => {
   <li><strong>WhatsApp Support:</strong> <a href="https://wa.me/${process.env.STORE_WHATSAPP || '917893100755'}">${process.env.STORE_PHONE || '+91 78931 00755'}</a> (Mon-Sat, 9:00 AM - 7:00 PM IST)</li>
   <li><strong>Registered Office &amp; Dispatch:</strong> ${process.env.STORE_ADDRESS || 'Hyderabad, Telangana, India'}</li>
 </ul>
-<p>You can also send us a message using the inquiry form below, and we will get back to you within 2 hours.</p>`
+<p>You can also send us a message using the inquiry form below, and we will get back to you within 24 hours.</p>`
       },
       'privacy-policy': {
         title: 'Privacy Policy',
@@ -335,7 +335,7 @@ router.post('/api/contact', async (req, res) => {
     res.json({
       success: true,
       inquiryId,
-      message: 'Thank you! Your message has been received. Our support team will get back to you within 2 hours.'
+      message: 'Thank you! Your message has been received. Our support team will get back to you within 24 hours.'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

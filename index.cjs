@@ -1,6 +1,9 @@
 const path = require('path');
-require('dotenv').config();
+// Load server/.env first (contains SMTP, MySQL, Razorpay, etc.)
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+// Then load root .env as fallback (won't override already-set vars)
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config();
 
 // PREVENT PROCESS CRASHES ON UNCAUGHT ERRORS
 process.on('uncaughtException', (err) => {

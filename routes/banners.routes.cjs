@@ -105,12 +105,16 @@ router.post(['/api/hero-slides', '/api/admin/hero-slides'], requireAdminAuth, as
       jars_img,
       script_quote,
       sort_order = 0,
-      is_active = 1
+      is_active = 1,
+      slide_type = 'SPLIT',
+      banner_img,
+      mobile_banner_img,
+      show_overlay_text = 0
     } = req.body;
 
     const myRes = await executeMySQL(
-      `INSERT INTO hero_slides (title_part1, title_part2, tagline, description, cta_text, cta_link, packaging_img, jars_img, script_quote, sort_order, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO hero_slides (title_part1, title_part2, tagline, description, cta_text, cta_link, packaging_img, jars_img, script_quote, sort_order, is_active, slide_type, banner_img, mobile_banner_img, show_overlay_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title_part1 || '',
         title_part2 || '',
@@ -122,15 +126,19 @@ router.post(['/api/hero-slides', '/api/admin/hero-slides'], requireAdminAuth, as
         jars_img || '',
         script_quote || '',
         Number(sort_order) || 0,
-        Number(is_active) ?? 1
+        Number(is_active) ?? 1,
+        slide_type || 'SPLIT',
+        banner_img || packaging_img || '',
+        mobile_banner_img || '',
+        Number(show_overlay_text) || 0
       ]
     );
 
     const newId = myRes ? myRes.insertId : Date.now();
     try {
       db.prepare(`
-        INSERT OR REPLACE INTO hero_slides (id, title_part1, title_part2, tagline, description, cta_text, cta_link, packaging_img, jars_img, script_quote, sort_order, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO hero_slides (id, title_part1, title_part2, tagline, description, cta_text, cta_link, packaging_img, jars_img, script_quote, sort_order, is_active, slide_type, banner_img, mobile_banner_img, show_overlay_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         newId,
         title_part1 || '',
@@ -143,7 +151,11 @@ router.post(['/api/hero-slides', '/api/admin/hero-slides'], requireAdminAuth, as
         jars_img || '',
         script_quote || '',
         Number(sort_order) || 0,
-        Number(is_active) ?? 1
+        Number(is_active) ?? 1,
+        slide_type || 'SPLIT',
+        banner_img || packaging_img || '',
+        mobile_banner_img || '',
+        Number(show_overlay_text) || 0
       );
     } catch (e) {}
 
@@ -160,7 +172,11 @@ router.post(['/api/hero-slides', '/api/admin/hero-slides'], requireAdminAuth, as
       jars_img,
       script_quote,
       sort_order,
-      is_active
+      is_active,
+      slide_type,
+      banner_img,
+      mobile_banner_img,
+      show_overlay_text
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -182,12 +198,16 @@ router.put(['/api/hero-slides/:id', '/api/admin/hero-slides/:id'], requireAdminA
       jars_img,
       script_quote,
       sort_order = 0,
-      is_active = 1
+      is_active = 1,
+      slide_type = 'SPLIT',
+      banner_img,
+      mobile_banner_img,
+      show_overlay_text = 0
     } = req.body;
 
     await executeMySQL(
       `UPDATE hero_slides 
-       SET title_part1 = ?, title_part2 = ?, tagline = ?, description = ?, cta_text = ?, cta_link = ?, packaging_img = ?, jars_img = ?, script_quote = ?, sort_order = ?, is_active = ?
+       SET title_part1 = ?, title_part2 = ?, tagline = ?, description = ?, cta_text = ?, cta_link = ?, packaging_img = ?, jars_img = ?, script_quote = ?, sort_order = ?, is_active = ?, slide_type = ?, banner_img = ?, mobile_banner_img = ?, show_overlay_text = ?
        WHERE id = ?`,
       [
         title_part1 || '',
@@ -201,6 +221,10 @@ router.put(['/api/hero-slides/:id', '/api/admin/hero-slides/:id'], requireAdminA
         script_quote || '',
         Number(sort_order) || 0,
         Number(is_active) ?? 1,
+        slide_type || 'SPLIT',
+        banner_img || packaging_img || '',
+        mobile_banner_img || '',
+        Number(show_overlay_text) || 0,
         id
       ]
     );
@@ -208,7 +232,7 @@ router.put(['/api/hero-slides/:id', '/api/admin/hero-slides/:id'], requireAdminA
     try {
       db.prepare(`
         UPDATE hero_slides 
-        SET title_part1 = ?, title_part2 = ?, tagline = ?, description = ?, cta_text = ?, cta_link = ?, packaging_img = ?, jars_img = ?, script_quote = ?, sort_order = ?, is_active = ?
+        SET title_part1 = ?, title_part2 = ?, tagline = ?, description = ?, cta_text = ?, cta_link = ?, packaging_img = ?, jars_img = ?, script_quote = ?, sort_order = ?, is_active = ?, slide_type = ?, banner_img = ?, mobile_banner_img = ?, show_overlay_text = ?
         WHERE id = ?
       `).run(
         title_part1 || '',
@@ -222,6 +246,10 @@ router.put(['/api/hero-slides/:id', '/api/admin/hero-slides/:id'], requireAdminA
         script_quote || '',
         Number(sort_order) || 0,
         Number(is_active) ?? 1,
+        slide_type || 'SPLIT',
+        banner_img || packaging_img || '',
+        mobile_banner_img || '',
+        Number(show_overlay_text) || 0,
         id
       );
     } catch (e) {}
