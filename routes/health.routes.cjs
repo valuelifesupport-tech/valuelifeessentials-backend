@@ -61,13 +61,37 @@ router.post('/api/maintenance/toggle', requireAdminAuth, async (req, res) => {
   }
 });
 
+const rateLimiter = require('../middleware/rateLimiter.cjs');
+
 // Maintenance Verify Password
-router.post('/api/maintenance/verify', (req, res) => {
+router.post('/api/maintenance/verify', rateLimiter(5, 60000), async (req, res) => {
   const { password } = req.body || {};
-  const MAINT_PASS = process.env.MAINTENANCE_PASSWORD || '';
-  if (password === MAINT_PASS) {
+  if (!password || typeof password !== 'string' || !password.trim()) {
+    return res.status(400).json({ success: false, error: 'Password required' });
+  }
+
+  const cleanInput = password.trim();
+  const expectedPass = (process.env.MAINTENANCE_PASSWORD || MAINTENANCE_PASSWORD || '').trim();
+
+  let matches = false;
+  if (expectedPass && cleanInput === expectedPass) {
+    matches = true;
+  }
+
+  // Also check database configured maintenance password if present
+  if (!matches) {
+    try {
+      const row = await executeMySQL('SELECT maintenance_password FROM store_settings WHERE id = 1');
+      if (row && row[0] && row[0].maintenance_password && row[0].maintenance_password.trim() === cleanInput) {
+        matches = true;
+      }
+    } catch (e) {}
+  }
+
+  if (matches) {
     return res.json({ success: true, token: 'maint_bypass_valuelife_' + Date.now() });
   }
+
   res.status(401).json({ success: false, error: 'Incorrect maintenance bypass password' });
 });
 
