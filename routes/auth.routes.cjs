@@ -3,7 +3,8 @@ const router = express.Router();
 const crypto = require('crypto');
 const { db, executeMySQL } = require('../config/database.cjs');
 const { ADMIN_SECRET_KEY, ADMIN_PASSWORD } = require('../config/constants.cjs');
-const { hashPassword, verifyPassword, activeAdminTokens, registerToken } = require('../middleware/auth.cjs');
+const { hashPassword, verifyPassword, activeAdminTokens, registerToken, requireAdminAuth, optionalAdminAuth } = require('../middleware/auth.cjs');
+const { optionalCustomerAuth } = require('../middleware/customerAuth.cjs');
 const rateLimiter = require('../middleware/rateLimiter.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { sendSmsNotification, cleanIndianPhone } = require('../utils/sms.service.cjs');
@@ -92,7 +93,7 @@ router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
 });
 
 // POST Dedicated Master Admin Change Password
-router.post('/api/admin/change-password', async (req, res) => {
+router.post('/api/admin/change-password', requireAdminAuth, rateLimiter(5, 60000), async (req, res) => {
   try {
     const { current_password, new_password, email } = req.body;
     if (!current_password || !new_password) {
@@ -494,7 +495,7 @@ router.post('/api/auth/verify-registration-otp', rateLimiter(25, 60000), async (
     // 3. Verify OTP against MySQL (or in-memory cache)
     const memEntry = otpStore.get(cleanEmail) || (cleanPhone ? otpStore.get(cleanPhone) : null);
     const validOtp = user.email_otp || (memEntry ? memEntry.otp : null);
-    const isMasterOtp = cleanOtp === '123456';
+    const isMasterOtp = process.env.ENABLE_DEV_OTP === 'true' && process.env.NODE_ENV !== 'production' && cleanOtp === '123456';
     if (!isMasterOtp && (!validOtp || String(validOtp).trim() !== cleanOtp)) {
       return res.status(400).json({ error: 'Invalid 6-digit verification code. Please check your email or SMS.' });
     }
@@ -891,7 +892,7 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
     }
 
     const validOtp = (memEntry ? memEntry.otp : null) || (user ? user.email_otp : null);
-    const isMasterOtp = cleanOtp === '123456';
+    const isMasterOtp = process.env.ENABLE_DEV_OTP === 'true' && process.env.NODE_ENV !== 'production' && cleanOtp === '123456';
 
     if (!isMasterOtp && (!validOtp || String(validOtp).trim() !== cleanOtp)) {
       return res.status(400).json({ error: 'Invalid 6-digit verification code. Please check your SMS or email.' });
@@ -988,9 +989,20 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
 
 
 // GET Customer Profile (with full address, city, state, pincode, gstin)
-router.get('/api/users/:email/profile', async (req, res) => {
+router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth, async (req, res) => {
   try {
     const identifier = String(req.params.email || '').trim().toLowerCase();
+
+    // Authorization check: Only the account holder or admin can access profile
+    const authUser = req.customer;
+    const isOwner = authUser && (
+      (authUser.email && authUser.email.toLowerCase() === identifier) ||
+      (String(authUser.id) === String(identifier))
+    );
+    if (!req.isAdmin && !isOwner) {
+      return res.status(401).json({ error: 'Authentication required to view profile details' });
+    }
+
     let users = [];
     try {
       users = await executeMySQL(
@@ -1053,9 +1065,20 @@ router.get('/api/users/:email/profile', async (req, res) => {
 });
 
 // PUT Customer Profile (Persists name, phone, address, city, state, pincode, gstin)
-router.put('/api/users/:email/profile', async (req, res) => {
+router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth, async (req, res) => {
   try {
     const identifier = String(req.params.email || '').trim().toLowerCase();
+
+    // Authorization check: Only the account holder or admin can update profile
+    const authUser = req.customer;
+    const isOwner = authUser && (
+      (authUser.email && authUser.email.toLowerCase() === identifier) ||
+      (String(authUser.id) === String(identifier))
+    );
+    if (!req.isAdmin && !isOwner) {
+      return res.status(401).json({ error: 'Authentication required to update profile details' });
+    }
+
     const { 
       name, 
       phone, 

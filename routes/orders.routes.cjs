@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db, executeMySQL } = require('../config/database.cjs');
-const { requireAdminAuth } = require('../middleware/auth.cjs');
+const { requireAdminAuth, optionalAdminAuth } = require('../middleware/auth.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
@@ -104,25 +104,29 @@ async function enrichOrdersWithItems(orders) {
   return Array.isArray(orders) ? orderList : orderList[0];
 }
 
-// GET Public Order Tracking (by order_number or phone — limited info, NO AUTH)
+// GET Public Order Tracking (by order_number or 10-digit phone — limited info, NO AUTH)
 router.get('/api/orders/track', async (req, res) => {
   try {
-    const query = (req.query.q || '').trim();
-    if (!query || query.length < 3) {
-      return res.status(400).json({ error: 'Please enter an order number or phone number (min 3 characters)' });
+    const rawQuery = (req.query.q || '').trim();
+    if (!rawQuery || rawQuery.length < 5) {
+      return res.status(400).json({ error: 'Please enter a valid order number (e.g. VL-123456) or 10-digit mobile number' });
     }
+
+    const cleanDigits = rawQuery.replace(/\D/g, '');
+    const isPhoneQuery = cleanDigits.length === 10;
+    const phoneToSearch = isPhoneQuery ? cleanDigits : 'NON_MATCHING_PHONE';
+    const cleanOrderNum = rawQuery.toUpperCase();
 
     let order = null;
     try {
       const rows = await executeMySQL(
         `SELECT id, order_number, customer_name, customer_phone, order_status, shipping_status, 
-                tracking_number, carrier, total_amount, currency, created_at, items_json
+                tracking_number, carrier, courier_name, total_amount, currency, created_at, items_json
          FROM orders 
-         WHERE LOWER(order_number) = LOWER(?) 
-            OR customer_phone LIKE ? 
-            OR id = ?
+         WHERE UPPER(order_number) = ? 
+            OR (phone != '' AND RIGHT(REPLACE(customer_phone, ' ', ''), 10) = ?)
          ORDER BY id DESC LIMIT 1`,
-        [query, `%${query}%`, query]
+        [cleanOrderNum, phoneToSearch]
       );
       if (rows && rows.length > 0) order = rows[0];
     } catch (e) {}
@@ -131,18 +135,23 @@ router.get('/api/orders/track', async (req, res) => {
       try {
         order = db.prepare(
           `SELECT id, order_number, customer_name, customer_phone, order_status, shipping_status,
-                  tracking_number, carrier, total_amount, currency, created_at, items_json
+                  tracking_number, carrier, courier_name, total_amount, currency, created_at, items_json
            FROM orders 
-           WHERE LOWER(order_number) = LOWER(?) 
-              OR customer_phone LIKE ?
-              OR id = ?
+           WHERE UPPER(order_number) = ? 
+              OR (customer_phone IS NOT NULL AND customer_phone LIKE ?)
            ORDER BY id DESC LIMIT 1`
-        ).get(query, `%${query}%`, query);
+        ).get(cleanOrderNum, isPhoneQuery ? `%${cleanDigits}` : 'NON_MATCHING');
       } catch (e) {}
     }
 
     if (!order) {
-      return res.status(404).json({ error: 'No order found with that order number or phone number' });
+      return res.status(404).json({ error: 'No order found with that order number or registered phone number' });
+    }
+
+    // Mask sensitive phone digits to prevent PII harvesting
+    if (order.customer_phone) {
+      const digits = String(order.customer_phone).replace(/\D/g, '');
+      order.customer_phone = digits.length >= 4 ? `******${digits.slice(-4)}` : '******';
     }
 
     // Parse items
@@ -669,7 +678,7 @@ router.put([
 });
 
 // POST Cancel Order (Customer or Admin)
-router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], async (req, res) => {
+router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], optionalAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
     const { reason, notes, email } = req.body || {};

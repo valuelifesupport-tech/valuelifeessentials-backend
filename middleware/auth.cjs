@@ -35,20 +35,26 @@ function verifyPassword(inputPassword, storedPassword) {
   return false;
 }
 
-function requireAdminAuth(req, res, next) {
+function getRequestToken(req) {
   const authHeader = req.headers['authorization'];
-  let token = null;
-
   if (authHeader) {
-    token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  } else {
-    token = req.headers['x-admin-token'] || req.headers['x-admin-key'] || req.query?.token || req.query?.admin_token;
+    return authHeader.replace(/^Bearer\s+/i, '').trim();
   }
+  return req.headers['x-admin-token'] || req.headers['x-admin-key'] || req.query?.token || req.query?.admin_token;
+}
+
+function requireAdminAuth(req, res, next) {
+  const token = getRequestToken(req);
 
   if (token && activeAdminTokens.has(token)) {
+    if (token === ADMIN_SECRET_KEY) {
+      req.isAdmin = true;
+      return next();
+    }
     const timestamp = tokenTimestamps.get(token);
     const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
     if (timestamp && (Date.now() - timestamp < TWENTY_FOUR_HOURS)) {
+      req.isAdmin = true;
       return next();
     } else {
       activeAdminTokens.delete(token);
@@ -59,10 +65,27 @@ function requireAdminAuth(req, res, next) {
   return res.status(401).json({ error: 'Authorization header missing, invalid, or expired' });
 }
 
+function optionalAdminAuth(req, res, next) {
+  const token = getRequestToken(req);
+  if (token && activeAdminTokens.has(token)) {
+    if (token === ADMIN_SECRET_KEY) {
+      req.isAdmin = true;
+    } else {
+      const timestamp = tokenTimestamps.get(token);
+      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+      if (timestamp && (Date.now() - timestamp < TWENTY_FOUR_HOURS)) {
+        req.isAdmin = true;
+      }
+    }
+  }
+  next();
+}
+
 module.exports = {
   activeAdminTokens,
   registerToken,
   hashPassword,
   verifyPassword,
-  requireAdminAuth
+  requireAdminAuth,
+  optionalAdminAuth
 };

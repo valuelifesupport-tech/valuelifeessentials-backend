@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
+const { CUSTOMER_JWT_SECRET } = require('../config/constants.cjs');
 
-const JWT_SECRET = process.env.CUSTOMER_JWT_SECRET || process.env.ADMIN_SECRET_KEY;
+const JWT_SECRET = process.env.CUSTOMER_JWT_SECRET || process.env.ADMIN_SECRET_KEY || CUSTOMER_JWT_SECRET;
 const TOKEN_EXPIRY = '7d';
 
 function generateCustomerToken(user) {

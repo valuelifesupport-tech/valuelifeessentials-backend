@@ -185,8 +185,14 @@ router.get('/api/media/proxy', async (req, res) => {
       return sendSvgFallback(res);
     }
 
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    res.setHeader('Content-Type', contentType);
+    const rawContentType = (response.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
+    // Strictly restrict to safe bitmap/raster image types - disallow html, js, and remote svg scripts
+    const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
+    const effectiveContentType = SAFE_IMAGE_TYPES.has(rawContentType) ? rawContentType : 'image/jpeg';
+
+    res.setHeader('Content-Type', effectiveContentType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
     res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
 
     const arrayBuffer = await response.arrayBuffer();
