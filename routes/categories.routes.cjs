@@ -10,6 +10,28 @@ function generateSlug(text) {
     .replace(/\-\-+/g, '-');
 }
 
+const DEFAULT_CATEGORY_IMAGES = {
+  'Herbs & Teas': 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=600&q=80',
+  'Cereals & Grains': 'https://images.unsplash.com/photo-1574323347407-f5e1ad6d020b?auto=format&fit=crop&w=600&q=80',
+  'Herbal Supplements': 'https://images.unsplash.com/photo-1617957743097-0d20ab242224?auto=format&fit=crop&w=600&q=80',
+  'Legumes & Pulses': 'https://images.unsplash.com/photo-1515543237350-b3eea1ec8082?auto=format&fit=crop&w=600&q=80',
+  'Nuts & Seeds': 'https://images.unsplash.com/photo-1508736793122-f516e3ba5569?auto=format&fit=crop&w=600&q=80',
+  'Spices & Seasoning': 'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=600&q=80',
+  'Flours & Starches': 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=600&q=80',
+  'Fruits & Snacks': 'https://images.unsplash.com/photo-1546548970-71785318a17b?auto=format&fit=crop&w=600&q=80',
+  'Grocery & Food': 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80',
+  'Health & Personal Care': 'https://images.unsplash.com/photo-1608248597262-838198f12c1c?auto=format&fit=crop&w=600&q=80',
+  'Skin & Body Care': 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=600&q=80',
+  'Home & Garden': 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?auto=format&fit=crop&w=600&q=80'
+};
+
+function resolveCategoryImg(cat) {
+  if (cat.image_url && !cat.image_url.includes('1791620')) {
+    return cat.image_url;
+  }
+  return DEFAULT_CATEGORY_IMAGES[cat.name] || cat.image_url || null;
+}
+
 // GET All Categories with Subcategories
 router.get(['/api/categories', '/api/categories/tree', '/api/admin/categories'], async (req, res) => {
   try {
@@ -19,6 +41,7 @@ router.get(['/api/categories', '/api/categories/tree', '/api/admin/categories'],
       const mySubs = await executeMySQL('SELECT * FROM subcategories ORDER BY id ASC') || [];
       const catsWithSubs = myCats.map(cat => ({
         ...cat,
+        image_url: resolveCategoryImg(cat),
         subcategories: mySubs.filter(sub => String(sub.category_id) === String(cat.id))
       }));
       return res.json(catsWithSubs);
@@ -29,6 +52,7 @@ router.get(['/api/categories', '/api/categories/tree', '/api/admin/categories'],
     const subs = db.prepare('SELECT * FROM subcategories ORDER BY id ASC').all() || [];
     const tree = rows.map(c => ({
       ...c,
+      image_url: resolveCategoryImg(c),
       subcategories: subs.filter(s => String(s.category_id) === String(c.id))
     }));
     res.json(tree);

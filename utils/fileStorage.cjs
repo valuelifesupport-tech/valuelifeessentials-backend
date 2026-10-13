@@ -2,20 +2,30 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Robust uploads directory finder: resolves to backend/uploads or server/uploads
-const candidates = [
+// Robust uploads directory finder: resolves to persistent directory on Hostinger or local uploads
+const persistentCandidates = [
+  '/home/u439830852/domains/backend.valuelifeessentials.com/uploads_persistent',
+  '/home/u439830852/uploads_persistent',
   path.resolve(__dirname, '../uploads'),
   path.resolve(__dirname, '../../server/uploads'),
   path.resolve(process.cwd(), 'uploads'),
   path.resolve(process.cwd(), 'server/uploads')
 ];
 
-let uploadsDir = candidates[0];
-for (const cand of candidates) {
-  if (fs.existsSync(cand)) {
-    uploadsDir = cand;
-    break;
-  }
+let uploadsDir = path.resolve(__dirname, '../uploads');
+for (const cand of persistentCandidates) {
+  try {
+    if (!fs.existsSync(cand)) {
+      const parent = path.dirname(cand);
+      if (fs.existsSync(parent)) {
+        fs.mkdirSync(cand, { recursive: true });
+      }
+    }
+    if (fs.existsSync(cand)) {
+      uploadsDir = cand;
+      break;
+    }
+  } catch (e) {}
 }
 
 if (!fs.existsSync(uploadsDir)) {

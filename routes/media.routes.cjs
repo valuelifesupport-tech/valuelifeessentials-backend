@@ -12,6 +12,8 @@ router.get(['/uploads/:filename', '/api/uploads/:filename', '/api/media/file/:fi
 
   const searchDirs = [
     uploadsDir,
+    '/home/u439830852/domains/backend.valuelifeessentials.com/uploads_persistent',
+    '/home/u439830852/uploads_persistent',
     path.resolve(__dirname, '../uploads'),
     path.resolve(__dirname, '../../server/uploads'),
     path.resolve(__dirname, '../../public/uploads'),
@@ -29,7 +31,11 @@ router.get(['/uploads/:filename', '/api/uploads/:filename', '/api/media/file/:fi
   }
 
   // Derive human label from filename (e.g. category or brand name)
-  const label = filename.replace(/\.(png|jpg|jpeg|webp|svg|gif)$/i, '').replace(/^\d+-/, '').replace(/[^a-zA-Z0-9 ]+/g, ' ').trim() || 'ValueLife Essentials';
+  let label = filename.replace(/\.(png|jpg|jpeg|webp|svg|gif)$/i, '').replace(/^\d+-/, '').replace(/[^a-zA-Z0-9 ]+/g, ' ').trim();
+  // If the label is just a hex hash / UUID or empty, fall back to "ValueLife Essentials"
+  if (!label || /^[a-f0-9\s-]{12,}$/i.test(label) || label.length > 25) {
+    label = 'ValueLife Essentials';
+  }
   return sendSvgFallback(res, label);
 });
 
