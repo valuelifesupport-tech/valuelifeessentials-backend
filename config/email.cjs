@@ -39,13 +39,13 @@ const sendEmailNotification = async (to, subject, htmlBody) => {
 
   const transporter = getTransporter();
   if (!transporter) {
-    console.warn(`⚠️ Email dispatch skipped for ${to}: SMTP_USER or SMTP_PASS not set in .env`);
+    console.log(`ℹ️ [Email] Dispatch skipped for ${to}: SMTP_USER or SMTP_PASS not set in .env`);
     return false;
   }
 
   // If SMTP verification has failed (e.g. Gmail BadCredentials), do not hang requests
   if (smtpVerified === false) {
-    console.warn(`⚠️ Email dispatch bypassed for ${to}: SMTP authentication previously failed.`);
+    console.log(`ℹ️ [Email] Dispatch bypassed for ${to}: SMTP authentication offline (fallback active).`);
     return false;
   }
 
@@ -62,7 +62,7 @@ const sendEmailNotification = async (to, subject, htmlBody) => {
     console.log(`✅ Email dispatched successfully to ${to} [${subject}]`);
     return true;
   } catch (err) {
-    console.warn(`⚠️ Email dispatch error for ${to}:`, err.message);
+    console.log(`ℹ️ [Email] Dispatch error for ${to}:`, err.message);
     if (err.message && (err.message.includes('BadCredentials') || err.message.includes('535') || err.message.includes('EAUTH'))) {
       smtpVerified = false;
     }
