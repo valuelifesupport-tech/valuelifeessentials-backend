@@ -9,19 +9,28 @@ const { requireAdminAuth } = require('../middleware/auth.cjs');
 // Serve uploaded image file with fallback
 router.get(['/uploads/:filename', '/api/uploads/:filename', '/api/media/file/:filename'], (req, res) => {
   const filename = path.basename(req.params.filename);
-  const filePath = path.join(uploadsDir, filename);
 
-  if (fs.existsSync(filePath)) {
-    return res.sendFile(filePath);
+  const searchDirs = [
+    uploadsDir,
+    path.resolve(__dirname, '../uploads'),
+    path.resolve(__dirname, '../../server/uploads'),
+    path.resolve(__dirname, '../../public/uploads'),
+    path.resolve(__dirname, '../../../public_html/uploads'),
+    path.resolve(process.cwd(), 'uploads'),
+    path.resolve(process.cwd(), 'server/uploads'),
+    path.resolve(process.cwd(), 'public/uploads')
+  ];
+
+  for (const dir of searchDirs) {
+    const candidate = path.join(dir, filename);
+    if (fs.existsSync(candidate)) {
+      return res.sendFile(candidate);
+    }
   }
 
-  // Check public/uploads
-  const altPath = path.resolve(__dirname, '../../public/uploads', filename);
-  if (fs.existsSync(altPath)) {
-    return res.sendFile(altPath);
-  }
-
-  return sendSvgFallback(res);
+  // Derive human label from filename (e.g. category or brand name)
+  const label = filename.replace(/\.(png|jpg|jpeg|webp|svg|gif)$/i, '').replace(/^\d+-/, '').replace(/[^a-zA-Z0-9 ]+/g, ' ').trim() || 'ValueLife Essentials';
+  return sendSvgFallback(res, label);
 });
 
 // Upload File - accepts 'file', 'image', or any field name

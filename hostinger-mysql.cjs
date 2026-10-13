@@ -820,10 +820,12 @@ function getMySQLPool() {
       port,
       waitForConnections: true,
       connectionLimit: 10,
+      maxIdle: 5,
+      idleTimeout: 30000,
       queueLimit: 0,
-      connectTimeout: 3000,
+      connectTimeout: 5000,
       enableKeepAlive: true,
-      keepAliveInitialDelay: 10000
+      keepAliveInitialDelay: 5000
     });
   } catch (err) {
     console.warn('MySQL pool create notice:', err.message);
