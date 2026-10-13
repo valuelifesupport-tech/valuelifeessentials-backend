@@ -26,7 +26,7 @@ const DEFAULT_CATEGORY_IMAGES = {
 };
 
 function resolveCategoryImg(cat) {
-  if (cat.image_url && !cat.image_url.includes('1791620')) {
+  if (cat.image_url && !cat.image_url.includes('179162')) {
     return cat.image_url;
   }
   return DEFAULT_CATEGORY_IMAGES[cat.name] || cat.image_url || null;
