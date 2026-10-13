@@ -5,6 +5,7 @@ const { requireAdminAuth, optionalAdminAuth } = require('../middleware/auth.cjs'
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
+const { sendOrderConfirmationSms } = require('../utils/sms.service.cjs');
 
 // Helper for strict 10-digit Indian phone normalization
 function sanitize10DigitPhone(raw) {
@@ -468,6 +469,13 @@ router.post('/api/orders', async (req, res) => {
       } catch (emErr) {
         console.warn('Failed to build confirmation email:', emErr.message);
       }
+    }
+
+    // Send confirmation SMS for COD orders
+    if (effectivePaymentMode === 'COD' && rawPhone) {
+      sendOrderConfirmationSms(rawPhone, orderNumber, totalAmount, 'COD').catch((e) =>
+        console.warn('Order confirmation SMS warn:', e.message)
+      );
     }
 
     res.json({

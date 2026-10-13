@@ -142,10 +142,127 @@ async function sendSmsNotification(phone, otp, messageType = 'VERIFICATION') {
     provider: 'CONSOLE_SIMULATOR', 
     note: 'Add TWO_FACTOR_API_KEY to .env for carrier network SMS delivery.' 
   };
+}
 
+/**
+ * Send Transactional Order Confirmation SMS to Indian Phone
+ * @param {string} phone - Indian mobile number
+ * @param {string} orderNumber - e.g. "VLE-1042"
+ * @param {number|string} totalAmount - e.g. 599
+ * @param {string} paymentMode - 'COD' | 'PAID_ONLINE'
+ */
+async function sendOrderConfirmationSms(phone, orderNumber, totalAmount, paymentMode = 'COD') {
+  const cleanPhone = cleanIndianPhone(phone);
+  if (!cleanPhone || cleanPhone.length !== 10) {
+    return { success: false, reason: 'INVALID_PHONE' };
+  }
+
+  const twoFactorKey = process.env.TWOFACTOR_API_KEY || process.env.TWO_FACTOR_API_KEY || process.env.TWO_FACTOR_KEY || 'be2f1c24-bc9a-11f1-af74-0200cd936042';
+  const fast2SmsKey = process.env.FAST2SMS_API_KEY || process.env.FAST2SMS_KEY || '';
+
+  // 1. 2FACTOR TSMS / Transactional endpoint
+  if (twoFactorKey) {
+    try {
+      const payload = JSON.stringify({
+        From: 'VALUEL',
+        To: cleanPhone,
+        Msg: `Thank you for choosing ValueLife Essentials! Order #${orderNumber} for Rs.${totalAmount} (${paymentMode}) is confirmed. Track on valuelifeessentials.com`
+      });
+
+      const options = {
+        hostname: '2factor.in',
+        path: `/API/V1/${twoFactorKey}/ADDON_SERVICES/SEND/TSMS`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        }
+      };
+
+      const result = await new Promise((resolve) => {
+        const req = https.request(options, (res) => {
+          let data = '';
+          res.on('data', chunk => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.Status === 'Success') {
+                console.log(`📱 [2FACTOR ORDER SMS SUCCESS] Order #${orderNumber} alert sent to +91 ${cleanPhone}`);
+                resolve({ success: true, provider: '2Factor', details: parsed.Details });
+              } else {
+                resolve({ success: false, provider: '2Factor', error: parsed.Details || data });
+              }
+            } catch (_) {
+              resolve({ success: false, provider: '2Factor', error: data });
+            }
+          });
+        });
+        req.on('error', (err) => resolve({ success: false, error: err.message }));
+        req.write(payload);
+        req.end();
+      });
+
+      if (result.success) return result;
+    } catch (err) {
+      console.warn('2Factor order SMS exception:', err.message);
+    }
+  }
+
+  // 2. Fast2SMS Quick Route Fallback
+  if (fast2SmsKey) {
+    try {
+      const postData = JSON.stringify({
+        route: 'q',
+        message: `ValueLife: Order #${orderNumber} of Rs.${totalAmount} confirmed (${paymentMode}). Visit valuelifeessentials.com to track.`,
+        numbers: cleanPhone
+      });
+
+      const options = {
+        hostname: 'www.fast2sms.com',
+        path: '/dev/bulkV2',
+        method: 'POST',
+        headers: {
+          'authorization': fast2SmsKey,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const result = await new Promise((resolve) => {
+        const req = https.request(options, (res) => {
+          let data = '';
+          res.on('data', chunk => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.return === true || res.statusCode === 200) {
+                console.log(`📱 [FAST2SMS ORDER SMS SUCCESS] Order #${orderNumber} sent to +91 ${cleanPhone}`);
+                resolve({ success: true, provider: 'Fast2SMS' });
+              } else {
+                resolve({ success: false, error: data });
+              }
+            } catch (_) {
+              resolve({ success: false, error: data });
+            }
+          });
+        });
+        req.on('error', (err) => resolve({ success: false, error: err.message }));
+        req.write(postData);
+        req.end();
+      });
+
+      if (result.success) return result;
+    } catch (err) {
+      console.warn('Fast2SMS order exception:', err.message);
+    }
+  }
+
+  console.log(`📱 [ORDER SMS NOTICE] Target: +91 ${cleanPhone} | Order: #${orderNumber} | Total: Rs.${totalAmount}`);
+  return { success: true, provider: 'CONSOLE_SIMULATOR' };
 }
 
 module.exports = {
   cleanIndianPhone,
-  sendSmsNotification
+  sendSmsNotification,
+  sendOrderConfirmationSms
 };

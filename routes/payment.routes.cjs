@@ -7,6 +7,7 @@ const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require('../config/constants.cj
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
+const { sendOrderConfirmationSms } = require('../utils/sms.service.cjs');
 const {
   initiatePaymentTransaction,
   recordGatewayHandshake,
@@ -386,6 +387,13 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
           } catch (emErr) {
             console.warn('Payment confirmation email build error:', emErr.message);
           }
+        }
+
+        // Dispatch Order Confirmation SMS for paid order
+        if (ord && ord.customer_phone) {
+          sendOrderConfirmationSms(ord.customer_phone, ord.order_number, ord.total_amount, 'PAID_ONLINE').catch(e =>
+            console.warn('Payment confirmation SMS warn:', e.message)
+          );
         }
       }
     }
