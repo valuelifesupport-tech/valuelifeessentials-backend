@@ -18,7 +18,7 @@ let Database;
 try {
   Database = require('better-sqlite3');
 } catch (e) {
-  console.log('⚠️ better-sqlite3 module not available on Linux. Production MySQL mode active.');
+  console.log('ℹ️ better-sqlite3 native binary bypassed on Linux. Production MySQL mode active.');
 }
 
 const dbPath = path.join(__dirname, 'ecommerce.db');

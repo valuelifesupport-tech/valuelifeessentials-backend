@@ -75,7 +75,7 @@ const _verifySmtp = async () => {
   const t = getTransporter();
   if (!t) {
     smtpVerified = false;
-    console.warn('⚠️ SMTP transporter not configured — email OTPs will use auto-verify fallback.');
+    console.log('ℹ️ SMTP transporter unconfigured — fallback OTP mode active.');
     return;
   }
   try {
@@ -84,7 +84,12 @@ const _verifySmtp = async () => {
     console.log('✅ SMTP connection verified — email OTPs will be delivered.');
   } catch (err) {
     smtpVerified = false;
-    console.warn('⚠️ SMTP verification failed:', err.message, '— check credentials and network.');
+    const isBadCreds = err.message && (err.message.includes('BadCredentials') || err.message.includes('535') || err.message.includes('EAUTH'));
+    if (isBadCreds) {
+      console.log('ℹ️ [Email] Gmail App Password expired or revoked by Google. To deliver real emails, update SMTP_PASS in .env with a fresh 16-character App Password from Google.');
+    } else {
+      console.log('ℹ️ [Email] SMTP offline:', err.message);
+    }
   }
 };
 _verifySmtp();
