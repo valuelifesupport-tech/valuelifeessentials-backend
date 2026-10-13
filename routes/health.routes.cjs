@@ -21,24 +21,24 @@ router.get(['/', '/health', '/api/health'], (req, res) => {
 router.get('/api/admin/diagnostic/find-uploads', requireAdminAuth, (req, res) => {
   const found = [];
   const searchRoots = [
-    process.cwd(),
-    path.resolve(process.cwd(), '..'),
-    path.resolve(process.cwd(), '../..'),
-    path.resolve(__dirname, '../..')
+    '/home/u439830852/domains/backend.valuelifeessentials.com/hbuilds/versions',
+    '/home/u439830852/domains/backend.valuelifeessentials.com',
+    '/home/u439830852/public_html',
+    '/home/u439830852'
   ];
 
   function search(dir, depth = 0) {
-    if (depth > 4) return;
+    if (depth > 5) return;
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const ent of entries) {
         const full = path.join(dir, ent.name);
         if (ent.isDirectory()) {
-          if (!ent.name.includes('node_modules') && !ent.name.startsWith('.')) {
+          if (!ent.name.includes('node_modules') && !ent.name.startsWith('.') && ent.name !== 'cache') {
             search(full, depth + 1);
           }
         } else if (ent.isFile()) {
-          if (ent.name.includes('ff0fde21') || ent.name.includes('1791620') || ent.name.includes('3bcac7ab')) {
+          if (ent.name.includes('ff0fde21') || ent.name.includes('1791620') || ent.name.includes('3bcac7ab') || ent.name.includes('4ebbaddc')) {
             found.push({ name: ent.name, path: full, size: fs.statSync(full).size });
           }
         }
