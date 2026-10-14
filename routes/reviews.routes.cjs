@@ -4,7 +4,7 @@ const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
 // GET Admin Reviews (With Product details and images)
-router.get('/api/admin/reviews', requireAdminAuth, async (req, res) => {
+router.get(['/api/admin/reviews', '/api/reviews/admin', '/api/reviews/all'], requireAdminAuth, async (req, res) => {
   try {
     let reviews = [];
     try {
@@ -81,9 +81,13 @@ router.get('/api/admin/reviews', requireAdminAuth, async (req, res) => {
   }
 });
 
-// GET Public Approved Reviews (for storefront testimonials — NO AUTH needed)
+// GET Public Approved Reviews (for storefront testimonials — supports includePending query)
 router.get('/api/reviews', async (req, res) => {
   try {
+    const isExplicitAll = req.query.status === 'ALL' || req.query.includePending === 'true' || req.query.admin === 'true';
+    const whereClause = isExplicitAll ? '' : "WHERE r.status = 'APPROVED'";
+    const limitClause = isExplicitAll ? '' : "LIMIT 20";
+
     let reviews = [];
     try {
       reviews = await executeMySQL(`
@@ -92,9 +96,9 @@ router.get('/api/reviews', async (req, res) => {
                p.title as product_title, p.image_url as product_thumbnail
         FROM product_reviews r 
         LEFT JOIN products p ON r.product_id = p.id 
-        WHERE r.status = 'APPROVED'
+        ${whereClause}
         ORDER BY r.created_at DESC
-        LIMIT 20
+        ${limitClause}
       `);
     } catch (e) {}
 
@@ -106,13 +110,13 @@ router.get('/api/reviews', async (req, res) => {
                  p.title as product_title, p.image_url as product_thumbnail
           FROM product_reviews r 
           LEFT JOIN products p ON r.product_id = p.id 
-          WHERE r.status = 'APPROVED'
+          ${whereClause}
           ORDER BY r.created_at DESC
-          LIMIT 20
+          ${limitClause}
         `).all() || [];
       } catch (e) {
         try {
-          reviews = db.prepare("SELECT * FROM product_reviews WHERE status = 'APPROVED' ORDER BY created_at DESC LIMIT 20").all() || [];
+          reviews = db.prepare(`SELECT * FROM product_reviews ${whereClause} ORDER BY created_at DESC ${limitClause}`).all() || [];
         } catch (e2) {}
       }
     }
