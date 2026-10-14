@@ -564,6 +564,37 @@ function initDb(db) {
       bestsellers_count INTEGER DEFAULT 8
     );
     INSERT OR IGNORE INTO store_sections_config (id) VALUES (1);
+
+    CREATE TABLE IF NOT EXISTS editorial_promo_config (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      badge_text TEXT DEFAULT 'LIMITED TIME OFFER',
+      title_part1 TEXT DEFAULT 'Pure Products',
+      title_part2 TEXT DEFAULT 'Happier Lives',
+      subtitle TEXT DEFAULT 'Flat 20% Off on Natural Essentials & Certified Organics',
+      cta_text TEXT DEFAULT 'Shop the Collection',
+      cta_link TEXT DEFAULT '/offers',
+      image_url TEXT DEFAULT 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=800&q=80',
+      script_quote TEXT DEFAULT 'Nature Nurtures You',
+      quote_subtext TEXT DEFAULT '🌿 Handcrafted with Care',
+      is_enabled INTEGER DEFAULT 1,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT OR IGNORE INTO editorial_promo_config (id) VALUES (1);
+
+    CREATE TABLE IF NOT EXISTS brand_story_config (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      badge_text TEXT DEFAULT 'WHO WE ARE',
+      heading TEXT DEFAULT 'Our Story',
+      overlay_title TEXT DEFAULT 'A Healthier',
+      overlay_subtitle TEXT DEFAULT 'Tomorrow Together',
+      description TEXT DEFAULT 'At ValueLife, we believe in the power of nature to create a healthier, happier world. Our mission is to bring you high-quality, natural and sustainable products for a better everyday life.',
+      cta_text TEXT DEFAULT 'Learn More',
+      cta_link TEXT DEFAULT '/pages/about-us',
+      image_url TEXT DEFAULT 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1000&q=80',
+      is_enabled INTEGER DEFAULT 1,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT OR IGNORE INTO brand_story_config (id) VALUES (1);
   `);
 
   try { db.exec('ALTER TABLE store_sections_config ADD COLUMN show_sales_ticker INTEGER DEFAULT 1'); } catch(e) {}

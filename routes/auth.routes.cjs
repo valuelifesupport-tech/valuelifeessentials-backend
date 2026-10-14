@@ -1072,7 +1072,7 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
   try {
     const rawId = String(req.params.email || '').trim();
     const identifier = rawId.toLowerCase();
-    const cleanPhone = sanitize10DigitPhone(rawId);
+    const paramPhone = sanitize10DigitPhone(rawId);
     if (!identifier) return res.status(400).json({ error: 'User identifier required' });
 
     const { 

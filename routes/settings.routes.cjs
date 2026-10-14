@@ -445,13 +445,27 @@ router.put(['/api/editorial-promo', '/api/admin/editorial-promo'], requireAdminA
 
     const setSql = keys.map(k => `${k} = ?`).join(', ');
     const vals = keys.map(k => fields[k]);
-    await executeMySQL(`UPDATE editorial_promo_config SET ${setSql} WHERE id = 1`, vals);
+    const updateResult = await executeMySQL(`UPDATE editorial_promo_config SET ${setSql} WHERE id = 1`, vals);
+    if (updateResult && updateResult.affectedRows === 0) {
+      const colNames = ['id', ...keys].join(', ');
+      const placeholders = ['1', ...keys.map(() => '?')].join(', ');
+      await executeMySQL(`INSERT INTO editorial_promo_config (${colNames}) VALUES (${placeholders})`, vals);
+    }
 
     try {
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS editorial_promo_config (
+          id INTEGER PRIMARY KEY DEFAULT 1,
+          badge_text TEXT, title_part1 TEXT, title_part2 TEXT, subtitle TEXT,
+          cta_text TEXT, cta_link TEXT, image_url TEXT, script_quote TEXT,
+          quote_subtext TEXT, is_enabled INTEGER DEFAULT 1, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run();
+      db.prepare('INSERT OR IGNORE INTO editorial_promo_config (id) VALUES (1)').run();
       db.prepare(`UPDATE editorial_promo_config SET ${setSql} WHERE id = 1`).run(...vals);
     } catch (e) {}
 
-    res.json({ success: true, message: 'Editorial promo updated' });
+    res.json({ success: true, message: 'Editorial promo updated', data: fields });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -497,13 +511,27 @@ router.put(['/api/brand-story', '/api/admin/brand-story'], requireAdminAuth, asy
 
     const setSql = keys.map(k => `${k} = ?`).join(', ');
     const vals = keys.map(k => fields[k]);
-    await executeMySQL(`UPDATE brand_story_config SET ${setSql} WHERE id = 1`, vals);
+    const updateResult = await executeMySQL(`UPDATE brand_story_config SET ${setSql} WHERE id = 1`, vals);
+    if (updateResult && updateResult.affectedRows === 0) {
+      const colNames = ['id', ...keys].join(', ');
+      const placeholders = ['1', ...keys.map(() => '?')].join(', ');
+      await executeMySQL(`INSERT INTO brand_story_config (${colNames}) VALUES (${placeholders})`, vals);
+    }
 
     try {
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS brand_story_config (
+          id INTEGER PRIMARY KEY DEFAULT 1,
+          badge_text TEXT, heading TEXT, overlay_title TEXT, overlay_subtitle TEXT,
+          description TEXT, cta_text TEXT, cta_link TEXT, image_url TEXT,
+          is_enabled INTEGER DEFAULT 1, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run();
+      db.prepare('INSERT OR IGNORE INTO brand_story_config (id) VALUES (1)').run();
       db.prepare(`UPDATE brand_story_config SET ${setSql} WHERE id = 1`).run(...vals);
     } catch (e) {}
 
-    res.json({ success: true, message: 'Brand story updated' });
+    res.json({ success: true, message: 'Brand story updated', data: fields });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
