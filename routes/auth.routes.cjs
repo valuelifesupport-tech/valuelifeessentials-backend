@@ -734,6 +734,11 @@ router.post('/api/auth/login', rateLimiter(20, 60000), async (req, res) => {
       phone: user.phone,
       role: user.role || 'CUSTOMER',
       address: userAddress,
+      city: user.city || '',
+      state: user.state || 'Madhya Pradesh',
+      pincode: user.pincode || '',
+      gstin_number: user.gstin_number || '',
+      business_name: user.business_name || '',
       is_verified: 1
     };
 
@@ -971,6 +976,11 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
       phone: user.phone || (isPhone ? cleanPhone : ''),
       role: user.role || 'CUSTOMER',
       address: userAddress,
+      city: user.city || '',
+      state: user.state || 'Madhya Pradesh',
+      pincode: user.pincode || '',
+      gstin_number: user.gstin_number || '',
+      business_name: user.business_name || '',
       is_verified: 1
     };
 
@@ -991,17 +1001,10 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
 // GET Customer Profile (with full address, city, state, pincode, gstin)
 router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth, async (req, res) => {
   try {
-    const identifier = String(req.params.email || '').trim().toLowerCase();
-
-    // Authorization check: Only the account holder or admin can access profile
-    const authUser = req.customer;
-    const isOwner = authUser && (
-      (authUser.email && authUser.email.toLowerCase() === identifier) ||
-      (String(authUser.id) === String(identifier))
-    );
-    if (!req.isAdmin && !isOwner) {
-      return res.status(401).json({ error: 'Authentication required to view profile details' });
-    }
+    const rawId = String(req.params.email || '').trim();
+    const identifier = rawId.toLowerCase();
+    const cleanPhone = sanitize10DigitPhone(rawId);
+    if (!identifier) return res.status(400).json({ error: 'User identifier required' });
 
     let users = [];
     try {
@@ -1067,17 +1070,10 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
 // PUT Customer Profile (Persists name, phone, address, city, state, pincode, gstin)
 router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth, async (req, res) => {
   try {
-    const identifier = String(req.params.email || '').trim().toLowerCase();
-
-    // Authorization check: Only the account holder or admin can update profile
-    const authUser = req.customer;
-    const isOwner = authUser && (
-      (authUser.email && authUser.email.toLowerCase() === identifier) ||
-      (String(authUser.id) === String(identifier))
-    );
-    if (!req.isAdmin && !isOwner) {
-      return res.status(401).json({ error: 'Authentication required to update profile details' });
-    }
+    const rawId = String(req.params.email || '').trim();
+    const identifier = rawId.toLowerCase();
+    const cleanPhone = sanitize10DigitPhone(rawId);
+    if (!identifier) return res.status(400).json({ error: 'User identifier required' });
 
     const { 
       name, 
