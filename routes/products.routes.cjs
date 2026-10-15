@@ -71,25 +71,65 @@ router.get('/api/products', async (req, res) => {
       }
     }
 
-    // Filter by collection if specified
+    // Filter by collection if specified (handles both collection_id and collection slug/name)
     if (collection && prods.length > 0) {
-      const pcRows = await executeMySQL('SELECT product_id FROM product_collections WHERE collection_id = ?', [collection]) || [];
-      const colPids = new Set(pcRows.map(r => r.product_id));
-      prods = prods.filter(p => colPids.has(p.id));
+      const cleanCol = String(collection).trim();
+      let pcRows = await executeMySQL(`
+        SELECT pc.product_id 
+        FROM product_collections pc
+        LEFT JOIN collections col ON pc.collection_id = col.id
+        WHERE pc.collection_id = ? OR LOWER(col.slug) = ? OR LOWER(col.name) = ?
+      `, [cleanCol, cleanCol.toLowerCase(), cleanCol.toLowerCase()]) || [];
+
+      if (!pcRows || pcRows.length === 0) {
+        try {
+          pcRows = db.prepare(`
+            SELECT pc.product_id 
+            FROM product_collections pc
+            LEFT JOIN collections col ON pc.collection_id = col.id
+            WHERE pc.collection_id = ? OR LOWER(col.slug) = ? OR LOWER(col.name) = ?
+          `).all(cleanCol, cleanCol.toLowerCase(), cleanCol.toLowerCase()) || [];
+        } catch (e) {
+          pcRows = [];
+        }
+      }
+
+      if (pcRows && pcRows.length > 0) {
+        const colPids = new Set(pcRows.map(r => r.product_id));
+        prods = prods.filter(p => colPids.has(p.id));
+      }
     }
 
     if (prods.length === 0) return res.json([]);
 
-    // Fetch images and variants in batch
+    // Fetch images, variants, and collection links in batch
     const pids = prods.map(p => p.id);
     const inClause = pids.map(() => '?').join(',');
 
     let images = await executeMySQL(`SELECT * FROM product_images WHERE product_id IN (${inClause}) ORDER BY sort_order ASC`, pids) || [];
     let variants = await executeMySQL(`SELECT * FROM product_variants WHERE product_id IN (${inClause}) ORDER BY id ASC`, pids) || [];
+    let prodCols = await executeMySQL(`SELECT product_id, collection_id FROM product_collections WHERE product_id IN (${inClause})`, pids) || [];
+
+    if (!images || images.length === 0) {
+      try {
+        images = db.prepare(`SELECT * FROM product_images WHERE product_id IN (${inClause}) ORDER BY sort_order ASC`).all(...pids) || [];
+      } catch (e) { images = []; }
+    }
+    if (!variants || variants.length === 0) {
+      try {
+        variants = db.prepare(`SELECT * FROM product_variants WHERE product_id IN (${inClause}) ORDER BY id ASC`).all(...pids) || [];
+      } catch (e) { variants = []; }
+    }
+    if (!prodCols || prodCols.length === 0) {
+      try {
+        prodCols = db.prepare(`SELECT product_id, collection_id FROM product_collections WHERE product_id IN (${inClause})`).all(...pids) || [];
+      } catch (e) { prodCols = []; }
+    }
 
     const enriched = prods.map(p => {
       const pImages = images.filter(img => img.product_id === p.id).map(img => img.image_url);
       const pVariants = variants.filter(v => v.product_id === p.id);
+      const pColIds = prodCols.filter(c => c.product_id === p.id).map(c => c.collection_id);
       const primaryImg = p.image_url || (pImages.length > 0 ? pImages[0] : null);
       const effectiveGst = (p.gst_percent !== null && p.gst_percent !== undefined && p.gst_percent !== '')
         ? Number(p.gst_percent)
@@ -101,7 +141,8 @@ router.get('/api/products', async (req, res) => {
         images: pImages.length > 0 ? pImages : (primaryImg ? [primaryImg] : []),
         image_url: primaryImg,
         thumbnail: p.thumbnail || primaryImg,
-        variants: pVariants
+        variants: pVariants,
+        collection_ids: pColIds
       };
     });
 
