@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth, optionalAdminAuth } = require('../middleware/auth.cjs');
+const { optionalCustomerAuth } = require('../middleware/customerAuth.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
@@ -779,7 +780,7 @@ router.get('/api/orders/recent-activity', async (req, res) => {
 });
 
 // GET Customer Order History (Supports email, phone, user_id query params)
-router.get('/api/users/:email/orders', async (req, res) => {
+router.get('/api/users/:email/orders', optionalAdminAuth, optionalCustomerAuth, async (req, res) => {
   try {
     const paramVal = decodeURIComponent(req.params.email || '').trim();
     const queryEmail = (req.query.email || '').trim();
@@ -789,6 +790,24 @@ router.get('/api/users/:email/orders', async (req, res) => {
     const emailToMatch = (queryEmail || (paramVal.includes('@') ? paramVal : '')).toLowerCase();
     const phoneToMatch = queryPhone || (!paramVal.includes('@') && paramVal.replace(/\D/g, '').length >= 6 ? paramVal : '');
     const cleanPhoneDigits = phoneToMatch.replace(/\D/g, '').slice(-10);
+
+    // IDOR Protection: Non-admins can only view their own order history
+    if (!req.isAdmin) {
+      if (!req.customer) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Authentication required to view order history.' });
+      }
+      const customerEmail = (req.customer.email || '').toLowerCase();
+      const customerPhone = (req.customer.phone || '').replace(/\D/g, '').slice(-10);
+      const customerId = Number(req.customer.id);
+
+      const targetMatchesEmail = emailToMatch && customerEmail && emailToMatch === customerEmail;
+      const targetMatchesPhone = cleanPhoneDigits && customerPhone && cleanPhoneDigits === customerPhone;
+      const targetMatchesId = queryUserId && customerId && queryUserId === customerId;
+
+      if (!targetMatchesEmail && !targetMatchesPhone && !targetMatchesId) {
+        return res.status(403).json({ success: false, error: 'Forbidden: You do not have permission to view another customer\'s orders.' });
+      }
+    }
 
     let orders = [];
 

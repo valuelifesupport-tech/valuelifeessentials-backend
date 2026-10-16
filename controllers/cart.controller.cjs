@@ -1,13 +1,48 @@
 const { executeMySQL, db } = require('../config/database.cjs');
 
 /**
+ * Helper: Strictly resolve authorized user_id to prevent IDOR attacks.
+ * Uses verified JWT token from req.customer (or admin credentials).
+ */
+function getAuthorizedUserId(req, res) {
+  const customerId = req.customer?.id ? Number(req.customer.id) : null;
+  const requestedUserId = (req.body?.user_id || req.query?.user_id) ? Number(req.body?.user_id || req.query?.user_id) : null;
+
+  // 1. Admin can act on behalf of any requested user_id
+  if (req.isAdmin && requestedUserId) {
+    return requestedUserId;
+  }
+
+  // 2. Prevent IDOR: If requested user_id doesn't match authenticated customer token, reject with 403 Forbidden!
+  if (requestedUserId && customerId && requestedUserId !== customerId) {
+    res.status(403).json({
+      success: false,
+      error: 'Forbidden: You do not have permission to access another user\'s cart or wishlist.'
+    });
+    return null;
+  }
+
+  // 3. Bind strictly to authenticated customer ID
+  if (customerId) {
+    return customerId;
+  }
+
+  // 4. Fallback for unauthenticated access attempts
+  res.status(401).json({
+    success: false,
+    error: 'Unauthorized: Authentication required. Please log in with a valid session token.'
+  });
+  return null;
+}
+
+/**
  * Cart Controller
  * Encapsulates business logic for user cart and wishlist operations.
  */
 const cartController = {
   getCart: async (req, res) => {
-    const userId = req.query.user_id;
-    if (!userId) return res.json({ success: true, items: [] });
+    const userId = getAuthorizedUserId(req, res);
+    if (!userId) return;
 
     const sql = `
       SELECT 
@@ -130,7 +165,9 @@ const cartController = {
   },
 
   syncCart: async (req, res) => {
-    const { user_id, product_id, variant_id = null, quantity = 1, items } = req.body;
+    const user_id = getAuthorizedUserId(req, res);
+    if (!user_id) return;
+    const { product_id, variant_id = null, quantity = 1, items } = req.body;
     if (!user_id) return res.status(400).json({ success: false, error: 'user_id is required' });
 
     if (Array.isArray(items)) {
@@ -223,8 +260,10 @@ const cartController = {
   },
 
   deleteCartItem: async (req, res) => {
-    const { user_id, product_id, variant_id } = req.body || req.query;
-    if (!user_id) return res.status(400).json({ success: false, error: 'user_id is required' });
+    const user_id = getAuthorizedUserId(req, res);
+    if (!user_id) return;
+
+    const { product_id, variant_id } = req.body || req.query;
 
     try {
       if (product_id) {
@@ -264,8 +303,9 @@ const cartController = {
   },
 
   getWishlist: async (req, res) => {
-    const userId = req.query.user_id;
-    if (!userId) return res.json({ success: true, items: [] });
+    const userId = getAuthorizedUserId(req, res);
+    if (!userId) return;
+
     let rows = await executeMySQL('SELECT * FROM user_wishlist WHERE user_id = ?', [userId]);
     if (!rows && db) {
       try {
@@ -278,8 +318,10 @@ const cartController = {
   },
 
   addWishlistItem: async (req, res) => {
-    const { user_id, product_id } = req.body;
-    if (!user_id || !product_id) return res.status(400).json({ success: false, error: 'user_id and product_id are required' });
+    const user_id = getAuthorizedUserId(req, res);
+    if (!user_id) return;
+    const { product_id } = req.body;
+    if (!product_id) return res.status(400).json({ success: false, error: 'product_id is required' });
 
     try {
       const existing = await executeMySQL('SELECT id FROM user_wishlist WHERE user_id = ? AND product_id = ?', [user_id, product_id]);
@@ -301,8 +343,10 @@ const cartController = {
   },
 
   removeWishlistItem: async (req, res) => {
-    const { user_id, product_id } = req.body || req.query;
-    if (!user_id || !product_id) return res.status(400).json({ success: false, error: 'user_id and product_id are required' });
+    const user_id = getAuthorizedUserId(req, res);
+    if (!user_id) return;
+    const { product_id } = req.body || req.query;
+    if (!product_id) return res.status(400).json({ success: false, error: 'product_id is required' });
 
     try {
       await executeMySQL('DELETE FROM user_wishlist WHERE user_id = ? AND product_id = ?', [user_id, product_id]);

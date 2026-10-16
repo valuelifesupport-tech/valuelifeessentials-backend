@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const { db, executeMySQL } = require('../config/database.cjs');
 const { ADMIN_SECRET_KEY, ADMIN_PASSWORD } = require('../config/constants.cjs');
 const { hashPassword, verifyPassword, activeAdminTokens, registerToken, requireAdminAuth, optionalAdminAuth } = require('../middleware/auth.cjs');
-const { optionalCustomerAuth } = require('../middleware/customerAuth.cjs');
+const { generateCustomerToken, optionalCustomerAuth } = require('../middleware/customerAuth.cjs');
 const rateLimiter = require('../middleware/rateLimiter.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { sendSmsNotification, cleanIndianPhone } = require('../utils/sms.service.cjs');
@@ -408,11 +408,15 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
         is_verified: 1
       };
 
+      const token = generateCustomerToken(customerUser);
+      customerUser.token = token;
+
       console.log(`✅ Auto-verified customer account (dispatch offline): ${cleanEmail} (ID: ${userId})`);
 
       return res.status(200).json({
         success: true,
         requireOtp: false,
+        token,
         user: customerUser,
         message: 'Account created and verified successfully!'
       });
@@ -485,9 +489,12 @@ router.post('/api/auth/verify-registration-otp', rateLimiter(25, 60000), async (
         role: user.role || 'CUSTOMER',
         is_verified: 1
       };
+      const token = generateCustomerToken(activeUser);
+      activeUser.token = token;
       return res.json({
         success: true,
         message: 'Account is already verified!',
+        token,
         user: activeUser
       });
     }
@@ -526,11 +533,15 @@ router.post('/api/auth/verify-registration-otp', rateLimiter(25, 60000), async (
       is_verified: 1
     };
 
+    const token = generateCustomerToken(activeUser);
+    activeUser.token = token;
+
     console.log(`✅ Customer Account Verified & Activated: ${cleanEmail} (ID: ${user.id})`);
 
     res.json({
       success: true,
       message: 'Verified & account activated successfully!',
+      token,
       user: activeUser
     });
   } catch (err) {
@@ -742,7 +753,10 @@ router.post('/api/auth/login', rateLimiter(20, 60000), async (req, res) => {
       is_verified: 1
     };
 
-    res.json({ success: true, user: customerUser });
+    const token = generateCustomerToken(customerUser);
+    customerUser.token = token;
+
+    res.json({ success: true, token, user: customerUser });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -984,11 +998,13 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
       is_verified: 1
     };
 
-    console.log(`✅ Customer successfully logged in via OTP: ${customerUser.name} (${customerUser.email || customerUser.phone})`);
+    const token = generateCustomerToken(customerUser);
+    customerUser.token = token;
 
     res.json({
       success: true,
       message: 'Login successful!',
+      token,
       user: customerUser
     });
   } catch (err) {
@@ -1048,6 +1064,8 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       } catch (e) {}
     }
 
+    const token = generateCustomerToken(u);
+
     res.json({
       id: u.id,
       name: u.name,
@@ -1060,10 +1078,58 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       pincode: u.pincode || '',
       gstin_number: u.gstin_number || '',
       business_name: u.business_name || '',
-      is_verified: u.is_verified ?? 1
+      is_verified: u.is_verified ?? 1,
+      token
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST Session Token Exchange (Allows active client session to obtain a fresh signed JWT)
+router.post('/api/auth/token', async (req, res) => {
+  try {
+    const { user_id, email, phone } = req.body || {};
+    const cleanId = user_id ? Number(user_id) : null;
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+    const cleanPhone = phone ? sanitize10DigitPhone(phone) : '';
+
+    if (!cleanId && !cleanEmail && !cleanPhone) {
+      return res.status(400).json({ success: false, error: 'User identifier required' });
+    }
+
+    let users = [];
+    try {
+      if (cleanId) {
+        users = await executeMySQL('SELECT id, name, email, phone, role FROM users WHERE id = ?', [cleanId]);
+      } else if (cleanEmail) {
+        users = await executeMySQL('SELECT id, name, email, phone, role FROM users WHERE LOWER(email) = ?', [cleanEmail]);
+      } else if (cleanPhone) {
+        users = await executeMySQL('SELECT id, name, email, phone, role FROM users WHERE phone = ?', [cleanPhone]);
+      }
+    } catch (e) {}
+
+    if (!users || users.length === 0) {
+      try {
+        if (cleanId) {
+          const row = db.prepare('SELECT id, name, email, phone, role FROM users WHERE id = ?').get(cleanId);
+          if (row) users = [row];
+        } else if (cleanEmail) {
+          const row = db.prepare('SELECT id, name, email, phone, role FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+          if (row) users = [row];
+        }
+      } catch (e) {}
+    }
+
+    if (!users || !users[0]) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const u = users[0];
+    const token = generateCustomerToken(u);
+    res.json({ success: true, token, user: { ...u, token } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
