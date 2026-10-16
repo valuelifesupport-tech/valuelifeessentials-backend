@@ -39,8 +39,8 @@ router.get(['/uploads/:filename', '/api/uploads/:filename', '/api/media/file/:fi
   return sendSvgFallback(res, label);
 });
 
-// Upload File - accepts 'file', 'image', or any field name
-router.post('/api/upload', requireAdminAuth, (req, res) => {
+// Upload File - accepts 'file', 'image', or any field name (Admin Only)
+router.post(['/api/upload', '/api/admin/upload'], requireAdminAuth, (req, res) => {
   upload.any()(req, res, async (err) => {
     if (err) {
       return res.status(400).json({ error: err.message, code: err.code });
@@ -48,10 +48,13 @@ router.post('/api/upload', requireAdminAuth, (req, res) => {
     try {
       const file = (req.files && req.files.length > 0) ? req.files[0] : req.file;
       if (file) {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
         const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
-        if (!allowedMimes.includes(file.mimetype)) {
+
+        if (!allowedExts.includes(ext) || !allowedMimes.includes(file.mimetype)) {
           if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-          return res.status(400).json({ error: 'Invalid file type. Only images are allowed.' });
+          return res.status(400).json({ error: 'Invalid file type. Only image files (JPG, PNG, WEBP, GIF, SVG) are permitted.' });
         }
         const url = `/uploads/${file.filename}`;
         return res.json({
@@ -68,7 +71,12 @@ router.post('/api/upload', requireAdminAuth, (req, res) => {
       if (req.body && req.body.dataUrl) {
         const match = req.body.dataUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
         if (match) {
-          const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+          const rawExt = match[1].toLowerCase();
+          const allowedBase64Exts = ['jpeg', 'jpg', 'png', 'webp', 'gif'];
+          if (!allowedBase64Exts.includes(rawExt)) {
+            return res.status(400).json({ error: 'Invalid base64 image format.' });
+          }
+          const ext = rawExt === 'jpeg' ? 'jpg' : rawExt;
           const filename = `${Date.now()}-base64.${ext}`;
           const buffer = Buffer.from(match[2], 'base64');
           fs.writeFileSync(path.join(uploadsDir, filename), buffer);
@@ -84,8 +92,8 @@ router.post('/api/upload', requireAdminAuth, (req, res) => {
   });
 });
 
-// List Media Files
-router.get(['/api/media', '/api/admin/media'], async (req, res) => {
+// List Media Files (Strictly Authenticated Admin Only)
+router.get(['/api/media', '/api/admin/media'], requireAdminAuth, async (req, res) => {
   try {
     const files = fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : [];
     const mediaList = files
