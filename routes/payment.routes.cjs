@@ -187,17 +187,17 @@ router.post(['/api/payment/failure', '/api/payment/razorpay/failure'], async (re
     // Mark order status as CANCELLED / FAILED and restore stock
     if (order_id) {
       const ordRows = await executeMySQL(
-        'SELECT id, order_number, customer_name, customer_email, total_amount, payment_status, order_status FROM orders WHERE (id = ? OR order_number = ?) AND payment_status != "PAID"',
+        'SELECT id, order_number, customer_name, customer_email, total_amount, payment_status, order_status FROM orders WHERE (id = ? OR order_number = ?) AND (payment_status != "PAID" OR order_status = "PENDING_PAYMENT")',
         [order_id, order_id]
       );
       if (ordRows && ordRows.length > 0) {
         const ord = ordRows[0];
         await executeMySQL(
-          'UPDATE orders SET payment_status = "FAILED", order_status = "CANCELLED", cancellation_reason = ? WHERE id = ?',
+          'UPDATE orders SET payment_status = "FAILED", order_status = "CANCELLED", paid_amount = 0, remaining_amount = total_amount, cancellation_reason = ? WHERE id = ?',
           [error_description || 'Payment checkout closed/cancelled', ord.id]
         );
         try {
-          db.prepare('UPDATE orders SET payment_status = "FAILED", order_status = "CANCELLED", cancellation_reason = ? WHERE id = ?')
+          db.prepare('UPDATE orders SET payment_status = "FAILED", order_status = "CANCELLED", paid_amount = 0, remaining_amount = total_amount, cancellation_reason = ? WHERE id = ?')
             .run(error_description || 'Payment checkout closed/cancelled', ord.id);
         } catch (e) {}
 

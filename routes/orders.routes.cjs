@@ -255,9 +255,14 @@ router.post('/api/orders', async (req, res) => {
       codBalance = 0;
     }
 
-    // SECURITY: Never trust client-supplied payment amounts. Calculate server-side only.
-    const paidAmount = (effectivePaymentMode === 'COD') ? 0 : payableNow;
-    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    // SECURITY & ACCOUNTING: For online payments (FULL, PARTIAL, PREPAID), no money has been received yet!
+    // The customer is only now opening the payment gateway checkout modal.
+    // paidAmount MUST strictly initialize to 0.00 until cryptographic HMAC payment verification succeeds.
+    const isCOD = (effectivePaymentMode === 'COD');
+    const paidAmount = 0;
+    const remainingAmount = totalAmount;
+    const initialPaymentStatus = 'PENDING';
+    const initialOrderStatus = isCOD ? 'PROCESSING' : 'PENDING_PAYMENT';
 
     const orderNumber = `VL-${Date.now().toString().slice(-6)}`;
     const itemsJsonString = JSON.stringify(orderItems);
@@ -355,8 +360,8 @@ router.post('/api/orders', async (req, res) => {
       orderNumber, rawName, rawEmail, rawPhone,
       rawAddress, effectiveCity, effectiveState, effectivePincode, country, currency, totalAmount, paidAmount,
       remainingAmount, effectivePaymentMode,
-      (paidAmount >= totalAmount ? 'PAID' : (paidAmount > 0 ? 'PARTIAL_PAID' : 'PENDING')),
-      (effectivePaymentMode === 'COD' ? 'PROCESSING' : 'PENDING_PAYMENT'),
+      initialPaymentStatus,
+      initialOrderStatus,
       effectiveNotes, taxAmount, cgstAmount, sgstAmount, igstAmount,
       '', '', '',
       finalUserId, payment_gateway, gateway_order_id || null, gateway_payment_id || null,
@@ -394,8 +399,8 @@ router.post('/api/orders', async (req, res) => {
         newOrderId, orderNumber, rawName, rawEmail, rawPhone,
         rawAddress, effectiveCity, effectiveState, effectivePincode, country, currency, totalAmount, paidAmount,
         remainingAmount, effectivePaymentMode,
-        (paidAmount >= totalAmount ? 'PAID' : (paidAmount > 0 ? 'PARTIAL_PAID' : 'PENDING')),
-        (effectivePaymentMode === 'COD' ? 'PROCESSING' : 'PENDING_PAYMENT'),
+        initialPaymentStatus,
+        initialOrderStatus,
         effectiveNotes, taxAmount, '', '',
         finalUserId, payment_gateway, effectiveState, subtotal, discount,
         coupon_code || null, taxAmount, shippingAmount, payableNow,

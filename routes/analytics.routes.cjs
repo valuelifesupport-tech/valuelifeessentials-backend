@@ -22,8 +22,27 @@ function computeOrderTaxMetrics(orders = []) {
   let reversedTaxableTurnover = 0;
   let totalCreditNotes = 0;
 
+  let taxPendingCollection = 0;
+  let pendingTaxableTurnover = 0;
+  let totalPendingInvoices = 0;
+
   const processedOrders = orders.map(ord => {
-    const isCancelled = (ord.order_status === 'CANCELLED' || ord.payment_status === 'REFUNDED');
+    const isCancelled = (ord.order_status === 'CANCELLED' || ord.payment_status === 'REFUNDED' || ord.payment_status === 'FAILED');
+    
+    // E-COMMERCE TAX INTEGRITY:
+    // Online orders that are awaiting payment or unpaid MUST NEVER be marked as collected!
+    const isPendingOnline = (ord.order_status === 'PENDING_PAYMENT' || 
+      (ord.payment_mode !== 'COD' && ord.payment_status !== 'PAID' && ord.payment_status !== 'PARTIAL_PAID'));
+
+    let orderTaxStatus = 'COLLECTED';
+    if (isCancelled) {
+      orderTaxStatus = 'REVERSED';
+    } else if (isPendingOnline) {
+      orderTaxStatus = 'PENDING';
+    } else {
+      orderTaxStatus = 'COLLECTED';
+    }
+
     const stateName = (ord.state_name || '').trim();
     const isIntraState = !stateName || stateName.toLowerCase() === storeBaseState;
 
@@ -76,14 +95,18 @@ function computeOrderTaxMetrics(orders = []) {
     }
     availableMonthsSet.add(monthKey);
 
-    // Accumulate KPIs
-    if (isCancelled) {
+    // Accumulate KPIs strictly according to actual payment receipt
+    if (orderTaxStatus === 'REVERSED') {
       totalCreditNotes++;
       taxReversedOnReturns += taxAmount;
       cgstReversed += cgst;
       sgstReversed += sgst;
       igstReversed += igst;
       reversedTaxableTurnover += taxableValue;
+    } else if (orderTaxStatus === 'PENDING') {
+      totalPendingInvoices++;
+      taxPendingCollection += taxAmount;
+      pendingTaxableTurnover += taxableValue;
     } else {
       totalGrossInvoices++;
       grossTaxCollected += taxAmount;
@@ -117,7 +140,7 @@ function computeOrderTaxMetrics(orders = []) {
       payment_status: ord.payment_status || 'PENDING',
       payment_mode: ord.payment_mode || 'COD',
       is_return: isCancelled,
-      tax_status: isCancelled ? 'REVERSED' : 'COLLECTED',
+      tax_status: orderTaxStatus,
       credit_note_number: isCancelled ? `CN-${ord.order_number}` : null,
       cancellation_reason: ord.cancellation_reason || '',
       cancellation_notes: ord.cancellation_notes || ''
@@ -131,15 +154,18 @@ function computeOrderTaxMetrics(orders = []) {
     summary: {
       total_invoices: processedOrders.length,
       active_invoices_count: totalGrossInvoices,
+      pending_invoices_count: totalPendingInvoices,
       credit_notes_count: totalCreditNotes,
       gross_taxable_turnover: Math.round(grossTaxableTurnover * 100) / 100,
       reversed_taxable_turnover: Math.round(reversedTaxableTurnover * 100) / 100,
+      pending_taxable_turnover: Math.round(pendingTaxableTurnover * 100) / 100,
       net_taxable_turnover: Math.round((grossTaxableTurnover - reversedTaxableTurnover) * 100) / 100,
       gross_tax_collected: Math.round(grossTaxCollected * 100) / 100,
       gross_cgst_collected: Math.round(grossCgstCollected * 100) / 100,
       gross_sgst_collected: Math.round(grossSgstCollected * 100) / 100,
       gross_igst_collected: Math.round(grossIgstCollected * 100) / 100,
       tax_reversed_on_returns: Math.round(taxReversedOnReturns * 100) / 100,
+      tax_pending_collection: Math.round(taxPendingCollection * 100) / 100,
       cgst_reversed: Math.round(cgstReversed * 100) / 100,
       sgst_reversed: Math.round(sgstReversed * 100) / 100,
       igst_reversed: Math.round(igstReversed * 100) / 100,
@@ -159,7 +185,7 @@ router.get('/api/admin/analytics', requireAdminAuth, async (req, res) => {
     let totalCollected = 0;
     let pendingOrders = 0;
 
-    const myOrders = await executeMySQL('SELECT total_amount, paid_amount, tax_amount, gst_amount, cgst_amount, sgst_amount, igst_amount, order_status, payment_status, created_at FROM orders') || [];
+    const myOrders = await executeMySQL('SELECT total_amount, paid_amount, tax_amount, gst_amount, cgst_amount, sgst_amount, igst_amount, order_status, payment_status, payment_mode, created_at FROM orders') || [];
     const totalOrders = myOrders.length;
 
     let totalGst = 0;
@@ -168,16 +194,21 @@ router.get('/api/admin/analytics', requireAdminAuth, async (req, res) => {
     let totalIgst = 0;
 
     myOrders.forEach(o => {
+      const isCancelled = (o.order_status === 'CANCELLED' || o.payment_status === 'REFUNDED' || o.payment_status === 'FAILED');
+      const isPendingOnline = (o.order_status === 'PENDING_PAYMENT' || (o.payment_mode !== 'COD' && o.payment_status !== 'PAID' && o.payment_status !== 'PARTIAL_PAID'));
+
       const orderTotal = Number(o.total_amount || 0);
       const paid = Number(o.paid_amount || 0);
       const tax = Number(o.tax_amount || o.gst_amount || 0);
 
-      totalRevenue += orderTotal;
-      totalCollected += paid;
-      totalGst += tax;
-      totalCgst += Number(o.cgst_amount || 0);
-      totalSgst += Number(o.sgst_amount || 0);
-      totalIgst += Number(o.igst_amount || 0);
+      if (!isCancelled && !isPendingOnline) {
+        totalRevenue += orderTotal;
+        totalCollected += paid;
+        totalGst += tax;
+        totalCgst += Number(o.cgst_amount || 0);
+        totalSgst += Number(o.sgst_amount || 0);
+        totalIgst += Number(o.igst_amount || 0);
+      }
 
       if (o.order_status === 'PENDING' || o.order_status === 'PROCESSING') pendingOrders++;
     });
@@ -346,6 +377,8 @@ router.get(['/api/admin/gst-report/export', '/api/admin/gst-report/csv'], requir
     }
     if (type === 'returns' || type === 'REVERSED') {
       filtered = filtered.filter(o => o.tax_status === 'REVERSED');
+    } else if (type === 'pending' || type === 'PENDING') {
+      filtered = filtered.filter(o => o.tax_status === 'PENDING');
     } else if (type === 'sales' || type === 'COLLECTED') {
       filtered = filtered.filter(o => o.tax_status === 'COLLECTED');
     }
@@ -399,7 +432,11 @@ router.get(['/api/admin/gst-report/export', '/api/admin/gst-report/csv'], requir
         o.igst_amount.toFixed(2),
         o.total_tax.toFixed(2),
         o.total_amount.toFixed(2),
-        escapeCsv(o.tax_status === 'REVERSED' ? 'REVERSED (CREDIT NOTE)' : 'TAX COLLECTED')
+        escapeCsv(
+          o.tax_status === 'REVERSED' ? 'REVERSED (CREDIT NOTE)' :
+          o.tax_status === 'PENDING' ? 'PENDING (AWAITING PAYMENT)' :
+          'TAX COLLECTED'
+        )
       ].join(','));
     }
 
