@@ -77,13 +77,9 @@ router.post(['/api/payment/create-order', '/api/payment/razorpay/create-order'],
       }
     }
 
-    // 3. Fallback to client amount only when neither order_id nor items exist
-    if (!finalAmount && !order_id && (!items || items.length === 0)) {
-      finalAmount = Number(req.body.amount || 0);
-    }
-
+    // 3. Strict Server Price Enforcement: Do NOT trust arbitrary client amounts
     if (!finalAmount || finalAmount <= 0) {
-      return res.status(400).json({ error: 'Valid positive payment amount is required' });
+      return res.status(400).json({ error: 'Valid order_id or items array required to initiate payment' });
     }
 
     const ip_address = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip;
@@ -328,7 +324,33 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
       );
       if (ordRows && ordRows.length > 0) {
         const ord = ordRows[0];
+
+        // STRICT ANTI-TAMPERING: Order Binding Check
+        if (existingTxn && existingTxn.order_id && String(existingTxn.order_id) !== String(ord.id) && String(existingTxn.order_id) !== String(ord.order_number)) {
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            fraud_alert: true,
+            error: 'Order binding mismatch: This payment transaction belongs to a different order.'
+          });
+        }
+
         const isPartial = ord.is_partial_payment == 1 || ord.payment_mode === 'PARTIAL';
+        const expectedPayable = isPartial ? Number(ord.payable_amount || ord.paid_amount || 0) : Number(ord.total_amount || 0);
+
+        // STRICT ANTI-TAMPERING: Payment Amount Integrity Check
+        if (existingTxn && existingTxn.amount) {
+          const paidTxnAmount = Number(existingTxn.amount);
+          if (paidTxnAmount > 0 && expectedPayable > 0 && paidTxnAmount < (expectedPayable - 1)) {
+            return res.status(400).json({
+              success: false,
+              verified: false,
+              fraud_alert: true,
+              error: `Payment amount tampering detected: Paid ₹${paidTxnAmount} is less than required ₹${expectedPayable}.`
+            });
+          }
+        }
+
         const newPaidAmount = isPartial ? Number(ord.payable_amount || ord.paid_amount || 0) : Number(ord.total_amount || 0);
         const newRemainingAmount = isPartial ? Number(ord.cod_balance_amount || Math.max(0, Number(ord.total_amount) - newPaidAmount)) : 0;
         const newPayStatus = isPartial ? 'PARTIAL_PAID' : 'PAID';

@@ -1167,6 +1167,24 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
     const paramPhone = sanitize10DigitPhone(rawId);
     if (!identifier) return res.status(400).json({ error: 'User identifier required' });
 
+    // IDOR Protection: Non-admins can only update their own profile
+    if (!req.isAdmin) {
+      if (!req.customer) {
+        return res.status(401).json({ error: 'Authentication required to update profile' });
+      }
+      const tokenEmail = (req.customer.email || '').toLowerCase().trim();
+      const tokenId = String(req.customer.id || '');
+      const tokenPhone = req.customer.phone ? sanitize10DigitPhone(req.customer.phone) : '';
+
+      const isMatch = (tokenEmail && tokenEmail === identifier) ||
+                      (tokenId && tokenId === identifier) ||
+                      (tokenPhone && (tokenPhone === paramPhone || tokenPhone === identifier));
+
+      if (!isMatch) {
+        return res.status(403).json({ error: 'Forbidden: You can only update your own profile' });
+      }
+    }
+
     const { 
       name, 
       phone, 
