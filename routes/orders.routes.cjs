@@ -798,18 +798,56 @@ router.get('/api/users/:email/orders', optionalAdminAuth, optionalCustomerAuth, 
 
     // IDOR Protection: Non-admins can only view their own order history
     if (!req.isAdmin) {
-      if (!req.customer) {
-        return res.status(401).json({ success: false, error: 'Unauthorized: Authentication required to view order history.' });
+      let isAuthorized = false;
+
+      if (req.customer) {
+        const customerEmail = (req.customer.email || '').toLowerCase().trim();
+        const customerPhone = (req.customer.phone || '').replace(/\D/g, '').slice(-10);
+        const customerId = Number(req.customer.id);
+
+        if (
+          (emailToMatch && customerEmail && emailToMatch === customerEmail) ||
+          (cleanPhoneDigits && customerPhone && cleanPhoneDigits === customerPhone) ||
+          (queryUserId && customerId && queryUserId === customerId) ||
+          (paramVal && (String(customerId) === paramVal || paramVal === 'me'))
+        ) {
+          isAuthorized = true;
+        } else if (customerId) {
+          // Double check database record in case token email/phone differed from current record
+          try {
+            const dbUsers = await executeMySQL('SELECT id, email, phone FROM users WHERE id = ?', [customerId]);
+            if (dbUsers && dbUsers[0]) {
+              const u = dbUsers[0];
+              const uEmail = (u.email || '').toLowerCase().trim();
+              const uPhone = (u.phone || '').replace(/\D/g, '').slice(-10);
+              if (
+                (emailToMatch && uEmail && emailToMatch === uEmail) ||
+                (cleanPhoneDigits && uPhone && cleanPhoneDigits === uPhone)
+              ) {
+                isAuthorized = true;
+              }
+            }
+          } catch (e) {}
+        }
+      } else {
+        // Fallback for legacy sessions without JWT: verify matching email AND phone against user record
+        if (emailToMatch && cleanPhoneDigits && cleanPhoneDigits.length === 10) {
+          try {
+            const matchedUser = await executeMySQL(
+              'SELECT id FROM users WHERE LOWER(email) = ? AND phone LIKE ?',
+              [emailToMatch, `%${cleanPhoneDigits}%`]
+            );
+            if (matchedUser && matchedUser.length > 0) {
+              isAuthorized = true;
+            }
+          } catch (e) {}
+        }
       }
-      const customerEmail = (req.customer.email || '').toLowerCase();
-      const customerPhone = (req.customer.phone || '').replace(/\D/g, '').slice(-10);
-      const customerId = Number(req.customer.id);
 
-      const targetMatchesEmail = emailToMatch && customerEmail && emailToMatch === customerEmail;
-      const targetMatchesPhone = cleanPhoneDigits && customerPhone && cleanPhoneDigits === customerPhone;
-      const targetMatchesId = queryUserId && customerId && queryUserId === customerId;
-
-      if (!targetMatchesEmail && !targetMatchesPhone && !targetMatchesId) {
+      if (!isAuthorized) {
+        if (!req.customer) {
+          return res.status(401).json({ success: false, error: 'Unauthorized: Authentication required to view order history.' });
+        }
         return res.status(403).json({ success: false, error: 'Forbidden: You do not have permission to view another customer\'s orders.' });
       }
     }

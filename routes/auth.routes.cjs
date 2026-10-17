@@ -1176,9 +1176,23 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       const tokenId = String(req.customer.id || '');
       const tokenPhone = req.customer.phone ? sanitize10DigitPhone(req.customer.phone) : '';
 
-      const isMatch = (tokenEmail && tokenEmail === identifier) ||
+      let isMatch = (tokenEmail && tokenEmail === identifier) ||
                       (tokenId && tokenId === identifier) ||
                       (tokenPhone && (tokenPhone === paramPhone || tokenPhone === identifier));
+
+      if (!isMatch && req.customer.id) {
+        try {
+          const dbRows = await executeMySQL('SELECT id, email, phone FROM users WHERE id = ?', [req.customer.id]);
+          if (dbRows && dbRows[0]) {
+            const u = dbRows[0];
+            const uEmail = (u.email || '').toLowerCase().trim();
+            const uPhone = u.phone ? sanitize10DigitPhone(u.phone) : '';
+            if (uEmail === identifier || uPhone === paramPhone || uPhone === identifier) {
+              isMatch = true;
+            }
+          }
+        } catch (e) {}
+      }
 
       if (!isMatch) {
         return res.status(403).json({ error: 'Forbidden: You can only update your own profile' });
