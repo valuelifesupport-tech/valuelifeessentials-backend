@@ -27,7 +27,7 @@ router.post('/api/shipping/shiprocket/check-serviceability', async (req, res) =>
 });
 
 // 2. ADMIN/INTERNAL: CREATE SHIPMENT IN SHIPROCKET FOR AN ORDER
-router.post('/api/shipping/shiprocket/create-shipment', async (req, res) => {
+router.post('/api/shipping/shiprocket/create-shipment', requireAdminAuth, async (req, res) => {
   try {
     const { order_id, pickup_location = 'Primary' } = req.body;
     if (!order_id) {
@@ -82,7 +82,7 @@ router.post('/api/shipping/shiprocket/create-shipment', async (req, res) => {
 });
 
 // 3. ADMIN: ASSIGN COURIER & GENERATE AWB NUMBER
-router.post('/api/shipping/shiprocket/assign-awb', async (req, res) => {
+router.post('/api/shipping/shiprocket/assign-awb', requireAdminAuth, async (req, res) => {
   try {
     const { order_id, shipment_id, courier_id } = req.body;
     let targetShipmentId = shipment_id;
@@ -175,7 +175,7 @@ router.post('/api/shipping/shiprocket/assign-awb', async (req, res) => {
 });
 
 // 4. ADMIN: SCHEDULE COURIER PICKUP
-router.post('/api/shipping/shiprocket/request-pickup', async (req, res) => {
+router.post('/api/shipping/shiprocket/request-pickup', requireAdminAuth, async (req, res) => {
   try {
     const { shipment_ids, order_id, pickup_date } = req.body;
     let targetIds = shipment_ids;
@@ -217,7 +217,7 @@ router.post('/api/shipping/shiprocket/request-pickup', async (req, res) => {
 });
 
 // 5. ADMIN: GENERATE SHIPPING LABEL (PDF)
-router.post('/api/shipping/shiprocket/generate-label', async (req, res) => {
+router.post('/api/shipping/shiprocket/generate-label', requireAdminAuth, async (req, res) => {
   try {
     const { shipment_id, order_id } = req.body;
     let targetId = shipment_id;
@@ -246,7 +246,7 @@ router.post('/api/shipping/shiprocket/generate-label', async (req, res) => {
 });
 
 // 6. ADMIN: GENERATE TAX INVOICE (PDF)
-router.post('/api/shipping/shiprocket/generate-invoice', async (req, res) => {
+router.post('/api/shipping/shiprocket/generate-invoice', requireAdminAuth, async (req, res) => {
   try {
     const { shiprocket_order_id, order_id } = req.body;
     let targetId = shiprocket_order_id;
@@ -305,7 +305,7 @@ router.get('/api/shipping/shiprocket/track/:query', async (req, res) => {
 });
 
 // 8. ADMIN: CANCEL SHIPMENT IN SHIPROCKET
-router.post('/api/shipping/shiprocket/cancel', async (req, res) => {
+router.post('/api/shipping/shiprocket/cancel', requireAdminAuth, async (req, res) => {
   try {
     const { shiprocket_order_id, order_id } = req.body;
     let targetId = shiprocket_order_id;
@@ -411,7 +411,7 @@ router.post('/api/shipping/shiprocket/webhook', async (req, res) => {
 });
 
 // 10. ADMIN: GET SHIPROCKET ACCOUNT OVERVIEW & WALLET BALANCE
-router.get('/api/shipping/shiprocket/account-overview', async (req, res) => {
+router.get('/api/shipping/shiprocket/account-overview', requireAdminAuth, async (req, res) => {
   try {
     const overview = await shiprocketService.getAccountOverview();
     res.json(overview);
@@ -421,7 +421,7 @@ router.get('/api/shipping/shiprocket/account-overview', async (req, res) => {
 });
 
 // 11. ADMIN: GET CONNECTED CHANNELS
-router.get('/api/shipping/shiprocket/channels', async (req, res) => {
+router.get('/api/shipping/shiprocket/channels', requireAdminAuth, async (req, res) => {
   try {
     const channels = await shiprocketService.getChannels();
     res.json(channels);
@@ -431,7 +431,7 @@ router.get('/api/shipping/shiprocket/channels', async (req, res) => {
 });
 
 // 12. ADMIN: GET REGISTERED PICKUP ADDRESSES
-router.get('/api/shipping/shiprocket/pickup-addresses', async (req, res) => {
+router.get('/api/shipping/shiprocket/pickup-addresses', requireAdminAuth, async (req, res) => {
   try {
     const pickups = await shiprocketService.getPickupAddresses();
     res.json(pickups);
@@ -441,7 +441,7 @@ router.get('/api/shipping/shiprocket/pickup-addresses', async (req, res) => {
 });
 
 // 13. ADMIN: ADD WAREHOUSE PICKUP ADDRESS
-router.post('/api/shipping/shiprocket/add-pickup-address', async (req, res) => {
+router.post('/api/shipping/shiprocket/add-pickup-address', requireAdminAuth, async (req, res) => {
   try {
     const result = await shiprocketService.addPickupAddress(req.body);
     res.json(result);

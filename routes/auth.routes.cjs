@@ -36,39 +36,55 @@ router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
 
     const cleanPass = String(password).trim();
     let isValid = (cleanPass === ADMIN_PASSWORD);
+    let currentAdmin = null;
 
-    // Also check MySQL/SQLite admin user if exists
-    if (!isValid) {
-      try {
-        let adminUsers = [];
-        if (adminIdentifier) {
-          adminUsers = await executeMySQL(
-            'SELECT id, name, email, password, role FROM users WHERE role = ? AND (LOWER(email) = ? OR LOWER(name) = ?)',
-            ['ADMIN', adminIdentifier.toLowerCase(), adminIdentifier.toLowerCase()]
-          );
-        }
-        if (!adminUsers || adminUsers.length === 0) {
-          adminUsers = await executeMySQL('SELECT id, name, email, password, role FROM users WHERE role = ?', ['ADMIN']);
-        }
-        for (const u of (adminUsers || [])) {
-          if (u.password && verifyPassword(cleanPass, u.password)) {
+    // Check MySQL for admin record
+    try {
+      let myAdmins = [];
+      if (adminIdentifier) {
+        myAdmins = await executeMySQL(
+          'SELECT id, name, email, password, role FROM users WHERE role = ? AND (LOWER(email) = ? OR LOWER(name) = ?)',
+          ['ADMIN', adminIdentifier.toLowerCase(), adminIdentifier.toLowerCase()]
+        );
+      }
+      if (!myAdmins || myAdmins.length === 0) {
+        myAdmins = await executeMySQL('SELECT id, name, email, password, role FROM users WHERE role = ? LIMIT 1', ['ADMIN']);
+      }
+      if (myAdmins && myAdmins.length > 0) {
+        currentAdmin = myAdmins[0];
+        for (const u of myAdmins) {
+          if (cleanPass === ADMIN_PASSWORD || (u.password && verifyPassword(cleanPass, u.password))) {
             isValid = true;
+            currentAdmin = u;
             break;
           }
         }
-      } catch (e) {}
+      }
+    } catch (e) {}
 
-      if (!isValid) {
-        try {
-          const sqAdmins = db.prepare('SELECT id, name, email, password, role FROM users WHERE role = ?').all('ADMIN');
-          for (const u of (sqAdmins || [])) {
-            if (u.password && verifyPassword(cleanPass, u.password)) {
+    // Check SQLite fallback if needed
+    if (!isValid || !currentAdmin) {
+      try {
+        let sqAdmins = [];
+        if (adminIdentifier) {
+          sqAdmins = db.prepare(
+            'SELECT id, name, email, password, role FROM users WHERE role = ? AND (LOWER(email) = ? OR LOWER(name) = ?)'
+          ).all('ADMIN', adminIdentifier.toLowerCase(), adminIdentifier.toLowerCase());
+        }
+        if (!sqAdmins || sqAdmins.length === 0) {
+          sqAdmins = db.prepare('SELECT id, name, email, password, role FROM users WHERE role = ? LIMIT 1').all('ADMIN');
+        }
+        if (sqAdmins && sqAdmins.length > 0) {
+          if (!currentAdmin) currentAdmin = sqAdmins[0];
+          for (const u of sqAdmins) {
+            if (cleanPass === ADMIN_PASSWORD || (u.password && verifyPassword(cleanPass, u.password))) {
               isValid = true;
+              currentAdmin = u;
               break;
             }
           }
-        } catch (e) {}
-      }
+        }
+      } catch (e) {}
     }
 
     if (!isValid) {
@@ -78,13 +94,16 @@ router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
     const token = `admin_tok_${crypto.randomBytes(24).toString('hex')}`;
     registerToken(token);
 
+    const activeEmail = currentAdmin?.email || adminIdentifier || process.env.ADMIN_EMAIL || 'admin@valuelifeessentials.com';
+    const activeName = currentAdmin?.name || 'Master Admin';
+
     res.json({
       success: true,
       token,
       admin: {
-        email: adminIdentifier || process.env.ADMIN_EMAIL || 'admin@valuelifeessentials.com',
+        email: activeEmail,
         role: 'ADMIN',
-        name: 'Master Admin'
+        name: activeName
       }
     });
   } catch (err) {
@@ -177,7 +196,7 @@ router.post('/api/admin/change-password', requireAdminAuth, rateLimiter(5, 60000
 });
 
 // GET Master Admin Profile (Display Name & Email)
-router.get('/api/admin/profile', async (req, res) => {
+router.get('/api/admin/profile', requireAdminAuth, async (req, res) => {
   try {
     let admin = null;
     try {
@@ -213,11 +232,16 @@ router.get('/api/admin/profile', async (req, res) => {
 });
 
 // PUT Update Master Admin Profile (Display Name & Email)
-router.put('/api/admin/profile', async (req, res) => {
+router.put('/api/admin/profile', requireAdminAuth, rateLimiter(10, 60000), async (req, res) => {
   try {
     const { name, email } = req.body;
     const cleanName = (name && String(name).trim()) || 'Master Admin Owner';
-    const cleanEmail = (email && String(email).trim().toLowerCase()) || 'admin@valuelifeessentials.com';
+    const cleanEmail = (email && String(email).trim().toLowerCase()) || '';
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Please provide a valid administrative email address.' });
+    }
 
     // 1. Update or Insert in MySQL
     try {
@@ -250,7 +274,9 @@ router.put('/api/admin/profile', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Admin profile updated successfully',
+      message: 'Admin profile updated successfully!',
+      name: cleanName,
+      email: cleanEmail,
       admin: {
         name: cleanName,
         email: cleanEmail,

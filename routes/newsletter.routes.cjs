@@ -40,7 +40,7 @@ router.post('/api/newsletter/subscribe', async (req, res) => {
 });
 
 // GET /api/admin/newsletter/subscribers (admin view)
-router.get(['/api/admin/newsletter/subscribers', '/api/newsletter/subscribers'], async (req, res) => {
+router.get(['/api/admin/newsletter/subscribers', '/api/newsletter/subscribers'], requireAdminAuth, async (req, res) => {
   try {
     let rows = [];
     try {
