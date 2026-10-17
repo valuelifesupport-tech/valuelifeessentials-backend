@@ -22,18 +22,54 @@ const errorHandler = require('./middleware/errorHandler.cjs');
 const app = express();
 
 // UNIVERSAL CORS & SECURITY HEADERS
-const ALLOWED_ORIGINS = new Set(
-  (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:3000')
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://www.valuelifeessentials.com',
+  'https://valuelifeessentials.com',
+  'https://admin.valuelifeessentials.com',
+  'https://backend.valuelifeessentials.com',
+  'http://www.valuelifeessentials.com',
+  'http://valuelifeessentials.com',
+  'http://admin.valuelifeessentials.com',
+  'http://backend.valuelifeessentials.com',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:3000',
+  'http://localhost:5000'
+];
+
+const ALLOWED_ORIGINS = new Set([
+  ...DEFAULT_ALLOWED_ORIGINS,
+  ...(process.env.ALLOWED_ORIGINS || '')
     .split(',')
-    .map(s => s.trim())
+    .map(s => s.trim().toLowerCase())
     .filter(Boolean)
-);
+]);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // allow same-origin, curl, server-to-server, mobile apps
+  const clean = String(origin).trim().toLowerCase().replace(/\/$/, '');
+  try {
+    const parsed = new URL(clean);
+    if (
+      parsed.hostname === 'valuelifeessentials.com' ||
+      parsed.hostname.endsWith('.valuelifeessentials.com') ||
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1'
+    ) {
+      return true;
+    }
+  } catch (e) {}
+  return ALLOWED_ORIGINS.has(clean);
+}
 
 app.use((req, res, next) => {
   const origin = req.headers.origin || '';
-  if (ALLOWED_ORIGINS.has(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true');
+  if (isAllowedOrigin(origin)) {
+    if (origin) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Vary', 'Origin');
+    }
   } else {
     res.header('Access-Control-Allow-Origin', '*');
   }
@@ -45,7 +81,7 @@ app.use((req, res, next) => {
   } else {
     res.header(
       'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-token, X-Admin-Token, x-admin-key, X-Admin-Key, x-auth-token, X-Auth-Token, Cache-Control, Pragma'
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-token, X-Admin-Token, x-admin-key, X-Admin-Key, x-auth-token, X-Auth-Token, x-customer-token, X-Customer-Token, x-user-id, X-User-Id, Cache-Control, Pragma'
     );
   }
 
@@ -60,7 +96,7 @@ app.use((req, res, next) => {
 
 app.use(cors({
   origin: (incomingOrigin, callback) => {
-    if (!incomingOrigin || ALLOWED_ORIGINS.has(incomingOrigin)) {
+    if (isAllowedOrigin(incomingOrigin)) {
       callback(null, true);
     } else {
       callback(null, false);
@@ -72,8 +108,10 @@ app.use(cors({
     'Origin', 'X-Requested-With', 'Content-Type', 'Accept',
     'Authorization', 'x-admin-token', 'X-Admin-Token',
     'x-admin-key', 'X-Admin-Key', 'x-auth-token', 'X-Auth-Token',
+    'x-customer-token', 'X-Customer-Token', 'x-user-id', 'X-User-Id',
     'Cache-Control', 'Pragma'
-  ]
+  ],
+  exposedHeaders: ['Content-Disposition', 'X-Total-Count']
 }));
 
 app.use(express.json({ limit: '50mb' }));

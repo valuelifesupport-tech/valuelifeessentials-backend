@@ -1,8 +1,14 @@
 <IfModule mod_headers.c>
-    Header always set Access-Control-Allow-Origin "*"
+    # Dynamically reflect allowed frontend origins with credentials support
+    SetEnvIfNoCase Origin "^https?://([a-zA-Z0-9-]+\.)*valuelifeessentials\.com$" CORS_ORIGIN=$0
+    SetEnvIfNoCase Origin "^https?://localhost(:[0-9]+)?$" CORS_ORIGIN=$0
+    SetEnvIfNoCase Origin "^https?://127\.0\.0\.1(:[0-9]+)?$" CORS_ORIGIN=$0
+
+    Header always set Access-Control-Allow-Origin "%{CORS_ORIGIN}e" env=CORS_ORIGIN
+    Header always set Access-Control-Allow-Credentials "true" env=CORS_ORIGIN
     Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-    Header always set Access-Control-Allow-Headers "*"
-    Header always set Access-Control-Expose-Headers "*"
+    Header always set Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-admin-token, X-Admin-Token, x-admin-key, X-Admin-Key, x-auth-token, X-Auth-Token, x-customer-token, X-Customer-Token, x-user-id, X-User-Id, Cache-Control, Pragma"
+    Header always set Access-Control-Expose-Headers "Content-Disposition, X-Total-Count"
     Header always set Access-Control-Max-Age "86400"
 </IfModule>
 
