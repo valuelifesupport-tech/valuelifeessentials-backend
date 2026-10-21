@@ -62,17 +62,27 @@ async function sendSmsNotification(phone, otp, messageType = 'VERIFICATION') {
         });
       };
 
-      // Try with ValueLife_OTP template first
-      let tfRes = await call2Factor(`https://2factor.in/API/V1/${twoFactorKey}/SMS/${cleanPhone}/${otp}/ValueLife_OTP`);
+      // 1. Primary requested endpoint: AUTOGEN with template OTP1
+      // Endpoint: https://2factor.in/API/V1/:api_key/SMS/:phone_number/AUTOGEN/OTP1
+      let tfRes = await call2Factor(`https://2factor.in/API/V1/${twoFactorKey}/SMS/${cleanPhone}/AUTOGEN/OTP1`);
       
-      // If template failed, fallback to default standard OTP endpoint
+      // If template failed, fallback to default standard AUTOGEN endpoint
       if (!tfRes.success) {
-        console.warn(`2Factor template returned: ${tfRes.error}. Falling back to default OTP endpoint...`);
-        tfRes = await call2Factor(`https://2factor.in/API/V1/${twoFactorKey}/SMS/${cleanPhone}/${otp}`);
+        console.warn(`2Factor AUTOGEN/OTP1 returned: ${tfRes.error}. Falling back to default AUTOGEN endpoint...`);
+        tfRes = await call2Factor(`https://2factor.in/API/V1/${twoFactorKey}/SMS/${cleanPhone}/AUTOGEN`);
+      }
+
+      // If still not sent and custom OTP provided, try with OTP1 template
+      if (!tfRes.success && otp) {
+        console.warn(`2Factor AUTOGEN returned: ${tfRes.error}. Trying custom OTP with OTP1...`);
+        tfRes = await call2Factor(`https://2factor.in/API/V1/${twoFactorKey}/SMS/${cleanPhone}/${otp}/OTP1`);
+        if (!tfRes.success) {
+          tfRes = await call2Factor(`https://2factor.in/API/V1/${twoFactorKey}/SMS/${cleanPhone}/${otp}`);
+        }
       }
 
       if (tfRes.success) {
-        console.log(`📱 [2FACTOR SMS SUCCESS] OTP [${otp}] dispatched to +91 ${cleanPhone} (Session ID: ${tfRes.sessionId})`);
+        console.log(`📱 [2FACTOR SMS SUCCESS] OTP dispatched to +91 ${cleanPhone} (Session ID: ${tfRes.sessionId})`);
         return tfRes;
       } else {
         console.warn(`⚠️ 2Factor dispatch error for +91 ${cleanPhone}:`, tfRes.error);
@@ -261,8 +271,45 @@ async function sendOrderConfirmationSms(phone, orderNumber, totalAmount, payment
   return { success: true, provider: 'CONSOLE_SIMULATOR' };
 }
 
+/**
+ * Verify OTP entered by customer via 2Factor.in Session ID
+ * @param {string} sessionId - 2Factor Session ID returned by AUTOGEN
+ * @param {string} enteredOtp - OTP entered by user
+ */
+async function verifyTwoFactorOtp(sessionId, enteredOtp) {
+  if (!sessionId || !enteredOtp) return { success: false, error: 'MISSING_PARAMS' };
+  const twoFactorKey = process.env.TWOFACTOR_API_KEY || process.env.TWO_FACTOR_API_KEY || process.env.TWO_FACTOR_KEY || 'be2f1c24-bc9a-11f1-af74-0200cd936042';
+  if (!twoFactorKey) return { success: false, error: 'NO_API_KEY' };
+
+  return new Promise((resolve) => {
+    const cleanSession = encodeURIComponent(String(sessionId).trim());
+    const cleanCode = encodeURIComponent(String(enteredOtp).trim());
+    const url = `https://2factor.in/API/V1/${twoFactorKey}/SMS/VERIFY/${cleanSession}/${cleanCode}`;
+    
+    https.get(url, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.Status === 'Success' || (parsed.Details && String(parsed.Details).toLowerCase().includes('matched'))) {
+            resolve({ success: true, details: parsed.Details });
+          } else {
+            resolve({ success: false, error: parsed.Details || data });
+          }
+        } catch (e) {
+          resolve({ success: false, error: data });
+        }
+      });
+    }).on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+}
+
 module.exports = {
   cleanIndianPhone,
   sendSmsNotification,
-  sendOrderConfirmationSms
+  sendOrderConfirmationSms,
+  verifyTwoFactorOtp
 };
