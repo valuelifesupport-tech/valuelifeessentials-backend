@@ -79,10 +79,15 @@ router.delete(['/api/banners/:id', '/api/admin/banners/:id'], requireAdminAuth, 
 // GET All Hero Slides
 router.get(['/api/hero-slides', '/api/admin/hero-slides'], async (req, res) => {
   try {
-    let rows = await executeMySQL('SELECT * FROM hero_slides ORDER BY sort_order ASC, id ASC');
+    const isAdminReq = req.path.includes('/admin/');
+    const query = isAdminReq 
+      ? 'SELECT * FROM hero_slides ORDER BY sort_order ASC, id ASC'
+      : 'SELECT * FROM hero_slides WHERE (is_active = 1 OR is_active IS NULL) AND id NOT IN (1, 2) AND title_part1 != "Better Choices" ORDER BY sort_order ASC, id ASC';
+
+    let rows = await executeMySQL(query);
     if (!rows || rows.length === 0) {
       try {
-        rows = db.prepare('SELECT * FROM hero_slides ORDER BY sort_order ASC, id ASC').all() || [];
+        rows = db.prepare(query).all() || [];
       } catch (e) {}
     }
     res.json(rows || []);
