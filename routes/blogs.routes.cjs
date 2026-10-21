@@ -124,11 +124,15 @@ router.get('/api/blogs/:slugOrId', async (req, res) => {
       return res.status(404).json({ error: 'Blog post not found' });
     }
 
-    // Increment view count asynchronously
+    // Increment view count real-time and return updated count immediately
+    const nextViews = (Number(blog.views_count) || 0) + 1;
+    blog.views_count = nextViews;
     try {
-      executeMySQL('UPDATE blog_posts SET views_count = views_count + 1 WHERE id = ?', [blog.id]);
-      db.prepare('UPDATE blog_posts SET views_count = views_count + 1 WHERE id = ?').run(blog.id);
-    } catch (e) {}
+      executeMySQL('UPDATE blog_posts SET views_count = ? WHERE id = ?', [nextViews, blog.id]).catch(() => {});
+      try {
+        db.prepare('UPDATE blog_posts SET views_count = ? WHERE id = ?').run(nextViews, blog.id);
+      } catch (_) {}
+    } catch (_) {}
 
     // Fetch related articles (same category or latest, excluding current)
     let related = await executeMySQL(
@@ -189,7 +193,9 @@ router.post(['/api/admin/blogs', '/api/admin/blog-posts'], requireAdminAuth, asy
       tags = 'Organic, Wellness',
       is_published = 1,
       is_featured = 0,
-      sort_order = 0
+      sort_order = 0,
+      created_at,
+      views_count = 0
     } = req.body;
 
     if (!title) {
@@ -205,7 +211,7 @@ router.post(['/api/admin/blogs', '/api/admin/blog-posts'], requireAdminAuth, asy
     }
 
     const myRes = await executeMySQL(
-      'INSERT INTO blog_posts (title, slug, category, excerpt, content, featured_image, author_name, author_avatar, author_role, read_time, tags, is_published, is_featured, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO blog_posts (title, slug, category, excerpt, content, featured_image, author_name, author_avatar, author_role, read_time, tags, is_published, is_featured, sort_order, created_at, views_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         title,
         finalSlug,
@@ -220,7 +226,9 @@ router.post(['/api/admin/blogs', '/api/admin/blog-posts'], requireAdminAuth, asy
         tags,
         Number(is_published) ?? 1,
         Number(is_featured) || 0,
-        Number(sort_order) || 0
+        Number(sort_order) || 0,
+        created_at ? new Date(created_at).toISOString().slice(0, 19).replace('T', ' ') : new Date().toISOString().slice(0, 19).replace('T', ' '),
+        Math.max(0, Number(views_count) || 0)
       ]
     );
 
@@ -280,7 +288,9 @@ router.put(['/api/admin/blogs/:id', '/api/admin/blog-posts/:id'], requireAdminAu
       tags,
       is_published,
       is_featured,
-      sort_order
+      sort_order,
+      created_at,
+      views_count
     } = req.body;
 
     const updates = [];
@@ -300,6 +310,19 @@ router.put(['/api/admin/blogs/:id', '/api/admin/blog-posts/:id'], requireAdminAu
     if (is_published !== undefined) { updates.push('is_published = ?'); params.push(Number(is_published)); }
     if (is_featured !== undefined) { updates.push('is_featured = ?'); params.push(Number(is_featured)); }
     if (sort_order !== undefined) { updates.push('sort_order = ?'); params.push(Number(sort_order)); }
+    if (created_at !== undefined && created_at) {
+      try {
+        const parsedDate = new Date(created_at);
+        if (!isNaN(parsedDate.getTime())) {
+          updates.push('created_at = ?');
+          params.push(parsedDate.toISOString().slice(0, 19).replace('T', ' '));
+        }
+      } catch (_) {}
+    }
+    if (views_count !== undefined) {
+      updates.push('views_count = ?');
+      params.push(Math.max(0, Number(views_count) || 0));
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
