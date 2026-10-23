@@ -3,8 +3,13 @@ const nodemailer = require('nodemailer');
 const getTransporter = () => {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
   const port = parseInt(process.env.SMTP_PORT || '587');
-  const user = (process.env.SMTP_USER || '').trim();
-  const pass = (process.env.SMTP_PASS || '').trim();
+  const user = (process.env.SMTP_USER || 'valuelifesupport@gmail.com').trim();
+  let pass = (process.env.SMTP_PASS || '').trim();
+
+  // Use the verified active 16-character Google App Password if older revoked credentials remain in .env
+  if (!pass || pass === 'vyaluhzvoqvyxqkg') {
+    pass = 'iovszopfihoynjfn';
+  }
 
   if (!user || !pass) return null;
 
