@@ -57,6 +57,26 @@ router.get('/api/admin/diagnostic/find-uploads', requireAdminAuth, (req, res) =>
   res.json({ cwd: process.cwd(), scannedRoots, foundCount: found.length, found });
 });
 
+// Admin Diagnostic: Test Outbound IP & 2Factor from Hostinger Server
+router.get('/api/admin/diagnostic/test-2factor', requireAdminAuth, async (req, res) => {
+  const getUrl = (url) => new Promise((resolve) => {
+    https.get(url, (resp) => {
+      let data = '';
+      resp.on('data', chunk => { data += chunk; });
+      resp.on('end', () => resolve({ statusCode: resp.statusCode, body: data }));
+    }).on('error', (err) => resolve({ error: err.message }));
+  });
+
+  const ipRes = await getUrl('https://api.ipify.org?format=json');
+  const tfKey = process.env.TWO_FACTOR_API_KEY || 'be2f1c24-bc9a-11f1-af74-0200cd936042';
+  const tfRes = await getUrl(`https://2factor.in/API/V1/${tfKey}/SMS/8602920188/AUTOGEN/OTP1`);
+
+  res.json({
+    hostingerOutboundIp: ipRes,
+    twoFactorResponse: tfRes
+  });
+});
+
 // Maintenance Status
 router.get('/api/maintenance/status', async (req, res) => {
   try {
