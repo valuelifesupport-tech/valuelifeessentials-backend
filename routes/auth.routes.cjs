@@ -652,6 +652,12 @@ router.post('/api/auth/resend-otp', rateLimiter(10, 60000), async (req, res) => 
       db.prepare('UPDATE users SET email_otp = ?, email_otp_expires = ? WHERE id = ?').run(otp, expiresAt, user.id);
     } catch (e) {}
 
+    let twoFactorSessionId = null;
+    if (user.phone) {
+      const smsRes = await sendSmsNotification(user.phone, otp, 'VERIFICATION').catch(e => console.warn('SMS notice:', e.message));
+      if (smsRes && smsRes.sessionId) twoFactorSessionId = smsRes.sessionId;
+    }
+
     otpStore.set(cleanEmail, { otp, twoFactorSessionId, expiresAt: Number(expiresAt) });
     if (cleanPhone) otpStore.set(cleanPhone, { otp, twoFactorSessionId, expiresAt: Number(expiresAt) });
     console.log(`🔑 Resend OTP for ${cleanEmail} (${cleanPhone}): [${otp}]`);
@@ -669,12 +675,6 @@ router.post('/api/auth/resend-otp', rateLimiter(10, 60000), async (req, res) => 
         <p style="font-size: 13px; color: #64748b;">⏱️ Valid for 10 minutes.</p>
       </div>`
     );
-
-    let twoFactorSessionId = null;
-    if (user.phone) {
-      const smsRes = await sendSmsNotification(user.phone, otp, 'VERIFICATION').catch(e => console.warn('SMS notice:', e.message));
-      if (smsRes && smsRes.sessionId) twoFactorSessionId = smsRes.sessionId;
-    }
 
     const isDev = process.env.NODE_ENV !== 'production';
 
@@ -874,14 +874,6 @@ router.post(['/api/auth/send-login-otp', '/api/auth/send-otp'], rateLimiter(20, 
       } catch (e) {}
     }
 
-    // Cache in in-memory OTP store
-    otpStore.set(target, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user?.id, channel });
-    if (isPhone) {
-      otpStore.set(`login_${cleanPhone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user?.id, channel });
-    } else {
-      otpStore.set(`login_${target}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user?.id, channel });
-    }
-
     console.log(`🔑 Login OTP generated for [${target}] via [${channel}]: [${otp}]`);
 
     let dispatchSuccess = false;
@@ -915,6 +907,14 @@ router.post(['/api/auth/send-login-otp', '/api/auth/send-otp'], rateLimiter(20, 
           <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">Do not share this code with anyone. If you did not request this OTP, you can safely ignore this message.</p>
         </div>`
       );
+    }
+
+    // Cache in in-memory OTP store with actual twoFactorSessionId
+    otpStore.set(target, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user?.id, channel });
+    if (isPhone) {
+      otpStore.set(`login_${cleanPhone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user?.id, channel });
+    } else {
+      otpStore.set(`login_${target}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user?.id, channel });
     }
 
     const isDev = process.env.NODE_ENV !== 'production';
@@ -1492,14 +1492,21 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
       db.prepare('UPDATE users SET email_otp = ?, email_otp_expires = ? WHERE id = ?').run(otp, expiresAt, user.id);
     } catch (e) {}
 
+    let twoFactorSessionId = null;
+    if (user.phone || cleanPhone) {
+      const smsRes = await sendSmsNotification(user.phone || cleanPhone, otp, 'FORGOT_PASSWORD').catch(e => {
+        console.warn('SMS notice:', e.message);
+        return { success: false };
+      });
+      if (smsRes && smsRes.sessionId) {
+        twoFactorSessionId = smsRes.sessionId;
+      }
+    }
+
     const cleanEmail = (user.email || '').toLowerCase();
-    otpStore.set(`reset_${cleanEmail}`, { otp, expiresAt: Number(expiresAt), userId: user.id });
-    if (user.phone) {
-      otpStore.set(`reset_${user.phone}`, { otp, expiresAt: Number(expiresAt), userId: user.id });
-    }
-    if (cleanPhone) {
-      otpStore.set(`reset_${cleanPhone}`, { otp, expiresAt: Number(expiresAt), userId: user.id });
-    }
+    if (cleanEmail) otpStore.set(`reset_${cleanEmail}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
+    if (user.phone) otpStore.set(`reset_${user.phone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
+    if (cleanPhone) otpStore.set(`reset_${cleanPhone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
 
     console.log(`🔑 Password reset OTP for ${user.email} (${user.phone}): [${otp}]`);
 
@@ -1519,21 +1526,6 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
           <p style="font-size: 13px; color: #64748b;">⏱️ Valid for 10 minutes. If you did not request this, please ignore this email.</p>
         </div>`
       );
-    }
-
-    // 2. Dispatch SMS OTP if phone is available
-    let twoFactorSessionId = null;
-    if (user.phone || cleanPhone) {
-      const smsRes = await sendSmsNotification(user.phone || cleanPhone, otp, 'FORGOT_PASSWORD').catch(e => {
-        console.warn('SMS notice:', e.message);
-        return { success: false };
-      });
-      if (smsRes && smsRes.sessionId) {
-        twoFactorSessionId = smsRes.sessionId;
-        if (cleanEmail) otpStore.set(`reset_${cleanEmail}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
-        if (user.phone) otpStore.set(`reset_${user.phone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
-        if (cleanPhone) otpStore.set(`reset_${cleanPhone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
-      }
     }
 
     const isDev = process.env.NODE_ENV !== 'production';
