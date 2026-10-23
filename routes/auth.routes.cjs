@@ -1318,15 +1318,22 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
   }
 });
 
-// POST Change Password (Customer & Admin compatible)
-router.post('/api/auth/change-password', async (req, res) => {
+// POST Change Password (Customer strictly requires valid session token)
+router.post('/api/auth/change-password', requireCustomerAuth, async (req, res) => {
   try {
     const { email, current_password, new_password } = req.body;
-    if (!email || !current_password || !new_password) {
+    if (!current_password || !new_password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    const cleanEmail = email.toLowerCase().trim();
+    const callerEmail = req.customer.email ? req.customer.email.toLowerCase().trim() : '';
+    const cleanEmail = email ? email.toLowerCase().trim() : callerEmail;
+
+    // Strict IDOR prevention: Customer can only change their own password
+    if (!req.isAdmin && callerEmail && cleanEmail && callerEmail !== cleanEmail) {
+      return res.status(403).json({ error: 'Forbidden: You cannot change another user\'s password.' });
+    }
+
     const cleanCurrent = String(current_password).trim();
     const cleanNew = String(new_password).trim();
 
@@ -1336,52 +1343,33 @@ router.post('/api/auth/change-password', async (req, res) => {
 
     let users = [];
     try {
-      users = await executeMySQL('SELECT id, password, role FROM users WHERE LOWER(email) = ?', [cleanEmail]);
+      users = await executeMySQL('SELECT id, password, role FROM users WHERE LOWER(email) = ? OR id = ?', [cleanEmail, req.customer.id]);
     } catch (e) {}
 
     if (!users || users.length === 0) {
       try {
-        const row = db.prepare('SELECT id, password, role FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+        const row = db.prepare('SELECT id, password, role FROM users WHERE LOWER(email) = ? OR id = ?').get(cleanEmail, req.customer.id);
         if (row) users = [row];
       } catch (e) {}
     }
 
-    let isMatch = false;
-    let isMasterAdmin = (cleanCurrent === ADMIN_PASSWORD);
-
-    if (users && users.length > 0) {
-      const user = users[0];
-      if (user.password && verifyPassword(cleanCurrent, user.password)) {
-        isMatch = true;
-      } else if (user.role === 'ADMIN' && isMasterAdmin) {
-        isMatch = true;
-      }
-    } else if (isMasterAdmin) {
-      isMatch = true;
+    if (!users || users.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    if (!isMatch) {
+    const user = users[0];
+    if (!user.password || !verifyPassword(cleanCurrent, user.password)) {
       return res.status(401).json({ error: 'Current password incorrect' });
     }
 
     const newHash = hashPassword(cleanNew);
 
-    if (users && users.length > 0) {
-      try {
-        await executeMySQL('UPDATE users SET password = ? WHERE LOWER(email) = ?', [newHash, cleanEmail]);
-      } catch (e) {}
-      try {
-        db.prepare('UPDATE users SET password = ? WHERE LOWER(email) = ?').run(newHash, cleanEmail);
-      } catch (e) {}
-    } else {
-      // If user was master admin without row for this exact email, update/insert admin row
-      try {
-        await executeMySQL('UPDATE users SET password = ? WHERE role = ?', [newHash, 'ADMIN']);
-      } catch (e) {}
-      try {
-        db.prepare('UPDATE users SET password = ? WHERE role = ?').run(newHash, 'ADMIN');
-      } catch (e) {}
-    }
+    try {
+      await executeMySQL('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
+    } catch (e) {}
+    try {
+      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(newHash, user.id);
+    } catch (e) {}
 
     res.json({ success: true, message: 'Password updated successfully' });
   } catch (err) {
