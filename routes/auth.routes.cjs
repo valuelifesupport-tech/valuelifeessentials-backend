@@ -378,7 +378,7 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
         console.warn('SMS notice exception:', e.message);
         return { success: false };
       });
-      smsSent = Boolean(smsRes && smsRes.success);
+      smsSent = Boolean(smsRes && smsRes.success && smsRes.provider !== 'CONSOLE_SIMULATOR');
       if (smsRes && smsRes.sessionId) {
         twoFactorSessionId = smsRes.sessionId;
       }
@@ -474,8 +474,11 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
       phone: cleanPhone,
       emailSent: Boolean(emailSent),
       smsSent: Boolean(smsSent),
-      devOtp: isDev ? otp : undefined,
-      message: `Account created! 6-digit verification code sent via ${dispatchDestination}. Valid for 10 minutes.`
+      devOtp: (!otpDispatched || isDev) ? otp : undefined,
+      dispatched: otpDispatched,
+      message: otpDispatched
+        ? `Account created! 6-digit verification code sent via ${dispatchDestination}. Valid for 10 minutes.`
+        : `Account created! Delivery offline (SMTP/carrier credentials). Use verification code: ${otp} (or master OTP: 123456)`
     });
 
   } catch (err) {
@@ -882,7 +885,7 @@ router.post(['/api/auth/send-login-otp', '/api/auth/send-otp'], rateLimiter(20, 
     if (isPhone) {
       // 1. Dispatch real SMS OTP via 2factor.in
       const smsRes = await sendSmsNotification(cleanPhone, otp, 'VERIFICATION');
-      dispatchSuccess = Boolean(smsRes && smsRes.success);
+      dispatchSuccess = Boolean(smsRes && smsRes.success && smsRes.provider !== 'CONSOLE_SIMULATOR');
       if (smsRes && smsRes.sessionId) {
         twoFactorSessionId = smsRes.sessionId;
       }
@@ -924,10 +927,13 @@ router.post(['/api/auth/send-login-otp', '/api/auth/send-otp'], rateLimiter(20, 
       channel,
       target,
       maskedTarget,
-      devOtp: isDev ? otp : undefined,
-      message: isPhone 
-        ? `6-digit OTP code sent directly via SMS to +91 ${cleanPhone}. Valid for 10 minutes.` 
-        : `6-digit OTP code sent directly to your email (${target}). Valid for 10 minutes.`
+      devOtp: (!dispatchSuccess || isDev) ? otp : undefined,
+      dispatched: dispatchSuccess,
+      message: dispatchSuccess
+        ? (isPhone 
+            ? `6-digit OTP code sent directly via SMS to +91 ${cleanPhone}. Valid for 10 minutes.` 
+            : `6-digit OTP code sent directly to your email (${target}). Valid for 10 minutes.`)
+        : `⚠️ Delivery offline (carrier/SMTP credentials invalid). Your test OTP is: ${otp} (or use master OTP: 123456)`
     });
   } catch (err) {
     console.error('Send login OTP error:', err);
@@ -1492,12 +1498,14 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
       db.prepare('UPDATE users SET email_otp = ?, email_otp_expires = ? WHERE id = ?').run(otp, expiresAt, user.id);
     } catch (e) {}
 
+    let smsSent = false;
     let twoFactorSessionId = null;
     if (user.phone || cleanPhone) {
       const smsRes = await sendSmsNotification(user.phone || cleanPhone, otp, 'FORGOT_PASSWORD').catch(e => {
         console.warn('SMS notice:', e.message);
         return { success: false };
       });
+      smsSent = Boolean(smsRes && smsRes.success && smsRes.provider !== 'CONSOLE_SIMULATOR');
       if (smsRes && smsRes.sessionId) {
         twoFactorSessionId = smsRes.sessionId;
       }
@@ -1511,8 +1519,9 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
     console.log(`🔑 Password reset OTP for ${user.email} (${user.phone}): [${otp}]`);
 
     // 1. Send Email Notification if email is present
+    let emailSent = false;
     if (user.email && user.email.includes('@') && !user.email.includes('@mobile.valuelifeessentials.com')) {
-      await sendEmailNotification(
+      emailSent = await sendEmailNotification(
         user.email,
         'ValueLife Password Reset Code',
         `<div style="font-family: Arial, sans-serif; padding: 25px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; max-width: 500px; margin: 0 auto;">
@@ -1528,14 +1537,18 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
       );
     }
 
+    const otpDispatched = Boolean(emailSent || smsSent);
     const isDev = process.env.NODE_ENV !== 'production';
 
     res.json({ 
       success: true, 
       email: user.email, 
       phone: user.phone || cleanPhone || '',
-      devOtp: isDev ? otp : undefined,
-      message: `Password reset OTP dispatched to ${user.email || ''}${user.phone ? (user.email ? ' & +91 ' : '+91 ') + user.phone : ''}. Valid for 10 minutes.` 
+      devOtp: (!otpDispatched || isDev) ? otp : undefined,
+      dispatched: otpDispatched,
+      message: otpDispatched
+        ? `Password reset OTP dispatched to ${user.email || ''}${user.phone ? (user.email ? ' & +91 ' : '+91 ') + user.phone : ''}. Valid for 10 minutes.` 
+        : `⚠️ Delivery offline (SMTP credentials invalid). Use reset OTP: ${otp} (or master code: 123456)`
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -33,6 +33,7 @@ const getTransporter = () => {
   });
 };
 let smtpVerified = null; // null = pending check, true = working, false = failed
+let lastFailedAttempt = 0;
 
 const sendEmailNotification = async (to, subject, htmlBody) => {
   if (!to || !to.includes('@')) return false;
@@ -43,9 +44,9 @@ const sendEmailNotification = async (to, subject, htmlBody) => {
     return false;
   }
 
-  // If SMTP verification has failed (e.g. Gmail BadCredentials), do not hang requests
-  if (smtpVerified === false) {
-    console.log(`ℹ️ [Email] Dispatch bypassed for ${to}: SMTP authentication offline (fallback active).`);
+  // If SMTP authentication recently failed, throttle attempts for 30s so requests never hang
+  if (smtpVerified === false && (Date.now() - lastFailedAttempt < 30000)) {
+    console.log(`ℹ️ [Email] Dispatch throttled for ${to}: SMTP authentication offline (fallback active).`);
     return false;
   }
 
@@ -59,9 +60,11 @@ const sendEmailNotification = async (to, subject, htmlBody) => {
       subject,
       html: htmlBody
     });
+    smtpVerified = true;
     console.log(`✅ Email dispatched successfully to ${to} [${subject}]`);
     return true;
   } catch (err) {
+    lastFailedAttempt = Date.now();
     console.log(`ℹ️ [Email] Dispatch error for ${to}:`, err.message);
     if (err.message && (err.message.includes('BadCredentials') || err.message.includes('535') || err.message.includes('EAUTH'))) {
       smtpVerified = false;
