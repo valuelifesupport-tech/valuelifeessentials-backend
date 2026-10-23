@@ -425,40 +425,13 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
     }
 
     const otpDispatched = Boolean(emailSent || smsSent);
-    const isDev = process.env.NODE_ENV !== 'production';
 
-    // If neither SMS nor Email could be sent (offline/dev fallback), auto-verify
-    if (!otpDispatched && !isDev) {
-      try {
-        await executeMySQL('UPDATE users SET is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?', [userId]);
-      } catch (e) {}
-      try {
-        db.prepare('UPDATE users SET is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?').run(userId);
-      } catch (e) {}
-      otpStore.delete(cleanEmail);
-      if (cleanPhone) otpStore.delete(cleanPhone);
-
-      const customerUser = {
-        id: userId,
-        name: cleanName,
-        email: cleanEmail,
-        phone: cleanPhone,
-        role: 'CUSTOMER',
-        address: '',
-        is_verified: 1
-      };
-
-      const token = generateCustomerToken(customerUser);
-      customerUser.token = token;
-
-      console.log(`✅ Auto-verified customer account (dispatch offline): ${cleanEmail} (ID: ${userId})`);
-
-      return res.status(200).json({
-        success: true,
-        requireOtp: false,
-        token,
-        user: customerUser,
-        message: 'Account created and verified successfully!'
+    // If neither SMS nor Email could be sent, do NOT auto-verify in production
+    if (!otpDispatched) {
+      console.warn(`⚠️ Registration OTP dispatch failed for: ${cleanEmail} / ${cleanPhone}`);
+      return res.status(503).json({
+        success: false,
+        error: 'Unable to deliver verification OTP to your phone or email right now. Please verify your contact details or try again later.'
       });
     }
 
@@ -474,11 +447,8 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
       phone: cleanPhone,
       emailSent: Boolean(emailSent),
       smsSent: Boolean(smsSent),
-      devOtp: (!otpDispatched || isDev) ? otp : undefined,
-      dispatched: otpDispatched,
-      message: otpDispatched
-        ? `Account created! 6-digit verification code sent via ${dispatchDestination}. Valid for 10 minutes.`
-        : `Account created! Delivery offline (SMTP/carrier credentials). Use verification code: ${otp} (or master OTP: 123456)`
+      dispatched: true,
+      message: `Account created! 6-digit verification code sent via ${dispatchDestination}. Valid for 10 minutes.`
     });
 
   } catch (err) {
@@ -545,10 +515,9 @@ router.post('/api/auth/verify-registration-otp', rateLimiter(25, 60000), async (
     // 3. Verify OTP against 2Factor API or MySQL / in-memory cache
     const memEntry = otpStore.get(cleanEmail) || (cleanPhone ? otpStore.get(cleanPhone) : null);
     const validOtp = user.email_otp || (memEntry ? memEntry.otp : null);
-    const isMasterOtp = cleanOtp === '123456' || (process.env.ENABLE_DEV_OTP === 'true' && cleanOtp === '123456');
 
-    let isMatch = isMasterOtp;
-    if (!isMatch && validOtp && String(validOtp).trim() === cleanOtp) {
+    let isMatch = false;
+    if (validOtp && String(validOtp).trim() === cleanOtp) {
       isMatch = true;
     }
     // Check 2Factor AUTOGEN Session verification if present
@@ -570,7 +539,7 @@ router.post('/api/auth/verify-registration-otp', rateLimiter(25, 60000), async (
 
     // 4. Check OTP Expiry
     const expiry = user.email_otp_expires ? Number(user.email_otp_expires) : (memEntry ? memEntry.expiresAt : 0);
-    if (!isMasterOtp && expiry && Date.now() > expiry) {
+    if (expiry && Date.now() > expiry) {
       return res.status(400).json({ error: 'Verification code has expired (10-minute limit). Please click "Resend OTP Code".' });
     }
 
@@ -679,29 +648,15 @@ router.post('/api/auth/resend-otp', rateLimiter(10, 60000), async (req, res) => 
       </div>`
     );
 
-    const isDev = process.env.NODE_ENV !== 'production';
-
-    // If email failed, auto-verify so user is not trapped
     if (!emailSent) {
-      try {
-        await executeMySQL('UPDATE users SET is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?', [user.id]);
-      } catch (e) {}
-      try {
-        db.prepare('UPDATE users SET is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?').run(user.id);
-      } catch (e) {}
-      otpStore.delete(cleanEmail);
-
-      return res.json({
-        success: true,
-        requireOtp: false,
-        user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: 'CUSTOMER', is_verified: 1 },
-        message: 'Account verified successfully! Email delivery was temporarily unavailable.'
+      return res.status(503).json({
+        success: false,
+        error: 'Unable to deliver verification code to your email at this time. Please check your email or contact support.'
       });
     }
 
     res.json({ 
       success: true, 
-      devOtp: isDev ? otp : undefined,
       message: `Fresh verification code sent to ${user.email}${user.phone ? ' & +91 ' + user.phone : ''}.` 
     });
   } catch (err) {
@@ -768,15 +723,9 @@ router.post('/api/auth/login', rateLimiter(20, 60000), async (req, res) => {
       );
 
       if (!emailSent) {
-        // If email service is offline or unconfigured, auto-verify so customer is not locked out
-        try {
-          await executeMySQL('UPDATE users SET is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?', [user.id]);
-        } catch (e) {}
-        try {
-          db.prepare('UPDATE users SET is_verified = 1, email_otp = NULL, email_otp_expires = NULL WHERE id = ?').run(user.id);
-        } catch (e) {}
-        user.is_verified = 1;
-        console.log(`✅ Auto-verified customer during login (email delivery offline): ${user.email}`);
+        return res.status(503).json({
+          error: 'Your account is not verified yet, and email verification could not be delivered at this time. Please contact support.'
+        });
       } else {
         return res.json({
           success: true,
@@ -920,20 +869,25 @@ router.post(['/api/auth/send-login-otp', '/api/auth/send-otp'], rateLimiter(20, 
       otpStore.set(`login_${target}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user?.id, channel });
     }
 
-    const isDev = process.env.NODE_ENV !== 'production';
+    if (!dispatchSuccess) {
+      console.warn(`⚠️ Login OTP dispatch failed for ${target} via ${channel}`);
+      return res.status(503).json({
+        success: false,
+        error: isPhone
+          ? 'Unable to send SMS OTP to this mobile number right now. Please verify your number or try logging in with email.'
+          : 'Unable to send OTP to your email right now. Please verify your email or try logging in with mobile number.'
+      });
+    }
 
     res.json({
       success: true,
       channel,
       target,
       maskedTarget,
-      devOtp: (!dispatchSuccess || isDev) ? otp : undefined,
-      dispatched: dispatchSuccess,
-      message: dispatchSuccess
-        ? (isPhone 
-            ? `6-digit OTP code sent directly via SMS to +91 ${cleanPhone}. Valid for 10 minutes.` 
-            : `6-digit OTP code sent directly to your email (${target}). Valid for 10 minutes.`)
-        : `⚠️ Delivery offline (carrier/SMTP credentials invalid). Your test OTP is: ${otp} (or use master OTP: 123456)`
+      dispatched: true,
+      message: isPhone 
+        ? `6-digit OTP code sent directly via SMS to +91 ${cleanPhone}. Valid for 10 minutes.` 
+        : `6-digit OTP code sent directly to your email (${target}). Valid for 10 minutes.`
     });
   } catch (err) {
     console.error('Send login OTP error:', err);
@@ -981,10 +935,9 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
     }
 
     const validOtp = (memEntry ? memEntry.otp : null) || (user ? user.email_otp : null);
-    const isMasterOtp = cleanOtp === '123456' || (process.env.ENABLE_DEV_OTP === 'true' && cleanOtp === '123456');
 
-    let isMatch = isMasterOtp;
-    if (!isMatch && validOtp && String(validOtp).trim() === cleanOtp) {
+    let isMatch = false;
+    if (validOtp && String(validOtp).trim() === cleanOtp) {
       isMatch = true;
     }
     // Check 2Factor AUTOGEN Session verification if present
@@ -1005,7 +958,7 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
     }
 
     const expiry = memEntry ? memEntry.expiresAt : (user?.email_otp_expires ? Number(user.email_otp_expires) : 0);
-    if (!isMasterOtp && expiry && Date.now() > expiry) {
+    if (expiry && Date.now() > expiry) {
       return res.status(400).json({ error: 'Verification code has expired. Please click "Resend OTP".' });
     }
 
@@ -1538,17 +1491,20 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
     }
 
     const otpDispatched = Boolean(emailSent || smsSent);
-    const isDev = process.env.NODE_ENV !== 'production';
+
+    if (!otpDispatched) {
+      return res.status(503).json({
+        success: false,
+        error: 'Unable to deliver password reset OTP at this moment. Please contact customer support.'
+      });
+    }
 
     res.json({ 
       success: true, 
       email: user.email, 
       phone: user.phone || cleanPhone || '',
-      devOtp: (!otpDispatched || isDev) ? otp : undefined,
-      dispatched: otpDispatched,
-      message: otpDispatched
-        ? `Password reset OTP dispatched to ${user.email || ''}${user.phone ? (user.email ? ' & +91 ' : '+91 ') + user.phone : ''}. Valid for 10 minutes.` 
-        : `⚠️ Delivery offline (SMTP credentials invalid). Use reset OTP: ${otp} (or master code: 123456)`
+      dispatched: true,
+      message: `Password reset OTP dispatched to ${user.email || ''}${user.phone ? (user.email ? ' & +91 ' : '+91 ') + user.phone : ''}. Valid for 10 minutes.` 
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1598,9 +1554,8 @@ router.post('/api/auth/reset-password', async (req, res) => {
     const memEntry = otpStore.get(`reset_${cleanEmail}`) || (user.phone ? otpStore.get(`reset_${user.phone}`) : null) || (cleanPhone ? otpStore.get(`reset_${cleanPhone}`) : null);
     const validOtp = user.email_otp || (memEntry ? memEntry.otp : null);
 
-    const isMasterOtp = cleanOtp === '123456' || (process.env.ENABLE_DEV_OTP === 'true' && cleanOtp === '123456');
-    let isMatch = isMasterOtp;
-    if (!isMatch && validOtp && String(validOtp).trim() === cleanOtp) {
+    let isMatch = false;
+    if (validOtp && String(validOtp).trim() === cleanOtp) {
       isMatch = true;
     }
     if (!isMatch && memEntry && memEntry.twoFactorSessionId) {
