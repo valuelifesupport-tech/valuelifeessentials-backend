@@ -64,7 +64,12 @@ async function sendSmsNotification(phone, otp, messageType = 'VERIFICATION') {
 
       // 1. Primary requested endpoint: AUTOGEN with template OTP1
       // Endpoint: https://2factor.in/API/V1/:api_key/SMS/:phone_number/AUTOGEN/OTP1
-      let tfRes = await call2Factor(`https://2factor.in/API/V1/${twoFactorKey}/SMS/${cleanPhone}/AUTOGEN/OTP1`);
+      const endpointPattern = process.env.TWO_FACTOR_ENDPOINT || 'https://2factor.in/API/V1/:api_key/SMS/:phone_number/AUTOGEN/OTP1';
+      const targetUrl = endpointPattern
+        .replace(':api_key', twoFactorKey)
+        .replace(':phone_number', cleanPhone);
+
+      let tfRes = await call2Factor(targetUrl);
       
       // If template failed, fallback to default standard AUTOGEN endpoint
       if (!tfRes.success) {
