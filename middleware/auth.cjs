@@ -29,10 +29,7 @@ function hashPassword(password) {
 
 function verifyPassword(inputPassword, storedPassword) {
   if (!inputPassword || !storedPassword) return false;
-  // Match hashed or fallback password
-  if (storedPassword === hashPassword(inputPassword)) return true;
-  if (inputPassword === ADMIN_PASSWORD) return true;
-  return false;
+  return storedPassword === hashPassword(inputPassword);
 }
 
 function getRequestToken(req) {

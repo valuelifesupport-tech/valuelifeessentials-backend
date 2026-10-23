@@ -30,61 +30,46 @@ router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
   try {
     const { email, username, password } = req.body;
     const adminIdentifier = String(email || username || '').trim();
+    if (!adminIdentifier) {
+      return res.status(400).json({ error: 'Admin username or email is required' });
+    }
     if (!password) {
       return res.status(400).json({ error: 'Password is required' });
     }
 
     const cleanPass = String(password).trim();
-    let isValid = (cleanPass === ADMIN_PASSWORD);
     let currentAdmin = null;
 
-    // Check MySQL for admin record
+    // Check MySQL for admin record matching the identifier
     try {
-      let myAdmins = [];
-      if (adminIdentifier) {
-        myAdmins = await executeMySQL(
-          'SELECT id, name, email, password, role FROM users WHERE role = ? AND (LOWER(email) = ? OR LOWER(name) = ?)',
-          ['ADMIN', adminIdentifier.toLowerCase(), adminIdentifier.toLowerCase()]
-        );
-      }
-      if (!myAdmins || myAdmins.length === 0) {
-        myAdmins = await executeMySQL('SELECT id, name, email, password, role FROM users WHERE role = ? LIMIT 1', ['ADMIN']);
-      }
-      if (myAdmins && myAdmins.length > 0) {
-        currentAdmin = myAdmins[0];
-        for (const u of myAdmins) {
-          if (cleanPass === ADMIN_PASSWORD || (u.password && verifyPassword(cleanPass, u.password))) {
-            isValid = true;
-            currentAdmin = u;
-            break;
-          }
-        }
-      }
+      const myAdmins = await executeMySQL(
+        'SELECT id, name, email, password, role FROM users WHERE role = ? AND (LOWER(email) = ? OR LOWER(name) = ?)',
+        ['ADMIN', adminIdentifier.toLowerCase(), adminIdentifier.toLowerCase()]
+      );
+      if (myAdmins && myAdmins.length > 0) currentAdmin = myAdmins[0];
     } catch (e) {}
 
     // Check SQLite fallback if needed
-    if (!isValid || !currentAdmin) {
+    if (!currentAdmin) {
       try {
-        let sqAdmins = [];
-        if (adminIdentifier) {
-          sqAdmins = db.prepare(
-            'SELECT id, name, email, password, role FROM users WHERE role = ? AND (LOWER(email) = ? OR LOWER(name) = ?)'
-          ).all('ADMIN', adminIdentifier.toLowerCase(), adminIdentifier.toLowerCase());
-        }
-        if (!sqAdmins || sqAdmins.length === 0) {
-          sqAdmins = db.prepare('SELECT id, name, email, password, role FROM users WHERE role = ? LIMIT 1').all('ADMIN');
-        }
-        if (sqAdmins && sqAdmins.length > 0) {
-          if (!currentAdmin) currentAdmin = sqAdmins[0];
-          for (const u of sqAdmins) {
-            if (cleanPass === ADMIN_PASSWORD || (u.password && verifyPassword(cleanPass, u.password))) {
-              isValid = true;
-              currentAdmin = u;
-              break;
-            }
-          }
-        }
+        const sqAdmin = db.prepare(
+          'SELECT id, name, email, password, role FROM users WHERE role = ? AND (LOWER(email) = ? OR LOWER(name) = ?)'
+        ).get('ADMIN', adminIdentifier.toLowerCase(), adminIdentifier.toLowerCase());
+        if (sqAdmin) currentAdmin = sqAdmin;
       } catch (e) {}
+    }
+
+    const isMasterAdminIdent = [
+      (process.env.ADMIN_EMAIL || 'admin@valuelifeessentials.com').toLowerCase(),
+      'admin',
+      'valuelifesupport@gmail.com'
+    ].includes(adminIdentifier.toLowerCase());
+
+    let isValid = false;
+    if (currentAdmin && currentAdmin.password && verifyPassword(cleanPass, currentAdmin.password)) {
+      isValid = true;
+    } else if (isMasterAdminIdent && cleanPass === ADMIN_PASSWORD) {
+      isValid = true;
     }
 
     if (!isValid) {
@@ -1062,6 +1047,24 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
     const cleanPhone = sanitize10DigitPhone(rawId);
     if (!identifier) return res.status(400).json({ error: 'User identifier required' });
 
+    // IDOR Protection: Non-admins can only view their own profile
+    if (!req.isAdmin) {
+      if (!req.customer) {
+        return res.status(401).json({ error: 'Authentication required to view profile.' });
+      }
+      const tokenEmail = (req.customer.email || '').toLowerCase().trim();
+      const tokenId = String(req.customer.id || '');
+      const tokenPhone = req.customer.phone ? sanitize10DigitPhone(req.customer.phone) : '';
+
+      const isMatch = (tokenEmail && tokenEmail === identifier) ||
+                      (tokenId && tokenId === identifier) ||
+                      (tokenPhone && (tokenPhone === cleanPhone || tokenPhone === identifier));
+
+      if (!isMatch) {
+        return res.status(403).json({ error: 'Forbidden: You can only view your own profile.' });
+      }
+    }
+
     let users = [];
     try {
       users = await executeMySQL(
@@ -1104,8 +1107,6 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       } catch (e) {}
     }
 
-    const token = generateCustomerToken(u);
-
     res.json({
       id: u.id,
       name: u.name,
@@ -1118,46 +1119,26 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       pincode: u.pincode || '',
       gstin_number: u.gstin_number || '',
       business_name: u.business_name || '',
-      is_verified: u.is_verified ?? 1,
-      token
+      is_verified: u.is_verified ?? 1
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST Session Token Exchange (Allows active client session to obtain a fresh signed JWT)
-router.post('/api/auth/token', async (req, res) => {
+// POST Session Token Refresh (Requires valid existing session token)
+router.post('/api/auth/token', requireCustomerAuth, async (req, res) => {
   try {
-    const { user_id, email, phone } = req.body || {};
-    const cleanId = user_id ? Number(user_id) : null;
-    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
-    const cleanPhone = phone ? sanitize10DigitPhone(phone) : '';
-
-    if (!cleanId && !cleanEmail && !cleanPhone) {
-      return res.status(400).json({ success: false, error: 'User identifier required' });
-    }
-
+    const callerId = req.customer.id;
     let users = [];
     try {
-      if (cleanId) {
-        users = await executeMySQL('SELECT id, name, email, phone, role FROM users WHERE id = ?', [cleanId]);
-      } else if (cleanEmail) {
-        users = await executeMySQL('SELECT id, name, email, phone, role FROM users WHERE LOWER(email) = ?', [cleanEmail]);
-      } else if (cleanPhone) {
-        users = await executeMySQL('SELECT id, name, email, phone, role FROM users WHERE phone = ?', [cleanPhone]);
-      }
+      users = await executeMySQL('SELECT id, name, email, phone, role FROM users WHERE id = ?', [callerId]);
     } catch (e) {}
 
     if (!users || users.length === 0) {
       try {
-        if (cleanId) {
-          const row = db.prepare('SELECT id, name, email, phone, role FROM users WHERE id = ?').get(cleanId);
-          if (row) users = [row];
-        } else if (cleanEmail) {
-          const row = db.prepare('SELECT id, name, email, phone, role FROM users WHERE LOWER(email) = ?').get(cleanEmail);
-          if (row) users = [row];
-        }
+        const row = db.prepare('SELECT id, name, email, phone, role FROM users WHERE id = ?').get(callerId);
+        if (row) users = [row];
       } catch (e) {}
     }
 

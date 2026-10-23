@@ -829,19 +829,6 @@ router.get('/api/users/:email/orders', optionalAdminAuth, optionalCustomerAuth, 
             }
           } catch (e) {}
         }
-      } else {
-        // Fallback for legacy sessions without JWT: verify matching email AND phone against user record
-        if (emailToMatch && cleanPhoneDigits && cleanPhoneDigits.length === 10) {
-          try {
-            const matchedUser = await executeMySQL(
-              'SELECT id FROM users WHERE LOWER(email) = ? AND phone LIKE ?',
-              [emailToMatch, `%${cleanPhoneDigits}%`]
-            );
-            if (matchedUser && matchedUser.length > 0) {
-              isAuthorized = true;
-            }
-          } catch (e) {}
-        }
       }
 
       if (!isAuthorized) {
