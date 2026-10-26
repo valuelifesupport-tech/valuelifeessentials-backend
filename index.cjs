@@ -124,6 +124,7 @@ app.use('/api/uploads', express.static(uploadsDir));
 
 // MOUNT MODULAR ROUTE CONTROLLERS
 app.use(require('./routes/health.routes.cjs'));
+app.use(require('./routes/sitemap.routes.cjs'));
 app.use(require('./routes/media.routes.cjs'));
 app.use(require('./routes/categories.routes.cjs'));
 app.use(require('./routes/collections.routes.cjs'));
