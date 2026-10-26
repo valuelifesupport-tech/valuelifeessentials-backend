@@ -1039,7 +1039,65 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
 });
 
 
-// GET Customer Profile (with full address, city, state, pincode, gstin)
+// 36 Indian States and Union Territories for robust address validation
+const VALID_INDIAN_STATES = [
+  'Andaman and Nicobar Islands',
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chandigarh',
+  'Chhattisgarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jammu and Kashmir',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Ladakh',
+  'Lakshadweep',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Puducherry',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal'
+];
+
+function normalizeIndianState(stateStr) {
+  if (!stateStr || typeof stateStr !== 'string') return null;
+  const clean = stateStr.trim().toLowerCase();
+  const found = VALID_INDIAN_STATES.find(s => s.toLowerCase() === clean);
+  return found || null;
+}
+
+function validatePincode(pincode) {
+  if (!pincode) return false;
+  const clean = String(pincode).trim();
+  return /^[1-9][0-9]{5}$/.test(clean);
+}
+
+// GET Indian States list (for dropdowns / validations)
+router.get('/api/locations/states', (req, res) => {
+  res.json({ success: true, states: VALID_INDIAN_STATES });
+});
+
+// GET Customer Profile (with full address, city, state, pincode, gstin, multiple addresses)
 router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth, async (req, res) => {
   try {
     const rawId = String(req.params.email || '').trim();
@@ -1068,18 +1126,32 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
     let users = [];
     try {
       users = await executeMySQL(
-        'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?',
+        'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?',
         [identifier, identifier, identifier]
       );
-    } catch (e) {}
+    } catch (e) {
+      try {
+        users = await executeMySQL(
+          'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?',
+          [identifier, identifier, identifier]
+        );
+      } catch (e2) {}
+    }
 
     if (!users || users.length === 0) {
       try {
         const row = db.prepare(
-          'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?'
+          'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?'
         ).get(identifier, identifier, identifier);
         if (row) users = [row];
-      } catch (e) {}
+      } catch (e) {
+        try {
+          const row = db.prepare(
+            'SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, is_verified FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?'
+          ).get(identifier, identifier, identifier);
+          if (row) users = [row];
+        } catch (e2) {}
+      }
     }
 
     if (!users || !users[0]) return res.status(404).json({ error: 'User not found' });
@@ -1101,10 +1173,36 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
 
           await executeMySQL(
             'UPDATE users SET address = ?, city = ?, state = ?, pincode = ? WHERE id = ?',
-            [u.address || '', u.city || '', u.state || 'Maharashtra', u.pincode || '', u.id]
+            [u.address || '', u.city || '', u.state || 'Madhya Pradesh', u.pincode || '', u.id]
           );
         }
       } catch (e) {}
+    }
+
+    // Parse multiple addresses
+    let parsedAddresses = [];
+    try {
+      if (u.addresses) {
+        parsedAddresses = typeof u.addresses === 'string' ? JSON.parse(u.addresses) : u.addresses;
+      }
+    } catch (e) {
+      parsedAddresses = [];
+    }
+    if (!Array.isArray(parsedAddresses)) parsedAddresses = [];
+
+    // Synthesize default entry if list empty but primary address exists
+    if (parsedAddresses.length === 0 && (u.address || u.city || u.pincode)) {
+      parsedAddresses.push({
+        id: 'addr_default',
+        name: u.name || '',
+        phone: u.phone || '',
+        address: u.address || '',
+        city: u.city || '',
+        state: u.state || 'Madhya Pradesh',
+        pincode: u.pincode || '',
+        type: 'Home',
+        is_default: true
+      });
     }
 
     res.json({
@@ -1115,11 +1213,12 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       role: u.role || 'CUSTOMER',
       address: u.address || '',
       city: u.city || '',
-      state: u.state || 'Maharashtra',
+      state: u.state || 'Madhya Pradesh',
       pincode: u.pincode || '',
       gstin_number: u.gstin_number || '',
       business_name: u.business_name || '',
-      is_verified: u.is_verified ?? 1
+      is_verified: u.is_verified ?? 1,
+      addresses: parsedAddresses
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1154,7 +1253,7 @@ router.post('/api/auth/token', requireCustomerAuth, async (req, res) => {
   }
 });
 
-// PUT Customer Profile (Persists name, phone, address, city, state, pincode, gstin)
+// PUT Customer Profile (Persists name, phone, address, city, state, pincode, gstin, multiple addresses)
 router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth, async (req, res) => {
   try {
     const rawId = String(req.params.email || '').trim();
@@ -1194,31 +1293,191 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       }
     }
 
-    const { 
+    let { 
       name, 
       phone, 
       address, 
       city = '', 
-      state = 'Maharashtra', 
+      state = '', 
       pincode = '', 
       gstin_number = '', 
-      business_name = '' 
+      business_name = '',
+      addresses
     } = req.body;
 
+    // --- Validation Section ---
+    let validatedAddresses = [];
+    if (addresses !== undefined && addresses !== null) {
+      const addrList = typeof addresses === 'string' ? JSON.parse(addresses) : addresses;
+      if (!Array.isArray(addrList)) {
+        return res.status(400).json({ error: 'Invalid addresses format. Expected an array of addresses.' });
+      }
+
+      for (let i = 0; i < addrList.length; i++) {
+        const item = addrList[i];
+        if (!item || typeof item !== 'object') continue;
+
+        const itemPincode = String(item.pincode || '').trim();
+        if (!validatePincode(itemPincode)) {
+          return res.status(400).json({
+            error: `Invalid PIN code "${item.pincode || ''}" in address #${i + 1}. PIN code must be exactly 6 digits and cannot start with 0 (e.g. 400001).`
+          });
+        }
+
+        const itemState = normalizeIndianState(item.state);
+        if (!itemState) {
+          return res.status(400).json({
+            error: `Invalid State "${item.state || ''}" in address #${i + 1}. Please select a valid Indian State or Union Territory.`
+          });
+        }
+
+        const itemPhone = item.phone ? sanitize10DigitPhone(item.phone) : '';
+        if (itemPhone && !/^[6-9]\d{9}$/.test(itemPhone)) {
+          return res.status(400).json({
+            error: `Invalid mobile number in address #${i + 1}. Phone number must be a valid 10-digit Indian mobile number.`
+          });
+        }
+
+        if (!item.name || String(item.name).trim().length < 2) {
+          return res.status(400).json({
+            error: `Recipient name is required (at least 2 characters) in address #${i + 1}.`
+          });
+        }
+
+        if (!item.address || String(item.address).trim().length < 5) {
+          return res.status(400).json({
+            error: `Street address is required (at least 5 characters) in address #${i + 1}.`
+          });
+        }
+
+        if (!item.city || String(item.city).trim().length < 2) {
+          return res.status(400).json({
+            error: `City is required in address #${i + 1}.`
+          });
+        }
+
+        validatedAddresses.push({
+          id: item.id || `addr_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+          name: String(item.name).trim(),
+          phone: itemPhone,
+          address: String(item.address).trim(),
+          city: String(item.city).trim(),
+          state: itemState,
+          pincode: itemPincode,
+          type: ['Home', 'Work', 'Other'].includes(item.type) ? item.type : 'Home',
+          landmark: String(item.landmark || '').trim(),
+          is_default: Boolean(item.is_default)
+        });
+      }
+
+      // Ensure exactly one default address if address list is not empty
+      if (validatedAddresses.length > 0) {
+        const hasDefault = validatedAddresses.some(a => a.is_default);
+        if (!hasDefault) {
+          validatedAddresses[0].is_default = true;
+        } else {
+          // If multiple are marked default, keep only the latest one marked
+          let foundDefault = false;
+          for (let j = validatedAddresses.length - 1; j >= 0; j--) {
+            if (validatedAddresses[j].is_default) {
+              if (!foundDefault) {
+                foundDefault = true;
+              } else {
+                validatedAddresses[j].is_default = false;
+              }
+            }
+          }
+        }
+
+        // Sync default address back to top-level address fields
+        const defaultAddr = validatedAddresses.find(a => a.is_default) || validatedAddresses[0];
+        address = defaultAddr.address;
+        city = defaultAddr.city;
+        state = defaultAddr.state;
+        pincode = defaultAddr.pincode;
+        if (!phone && defaultAddr.phone) phone = defaultAddr.phone;
+        if (!name && defaultAddr.name) name = defaultAddr.name;
+      }
+    } else {
+      // Single address field validations
+      if (pincode && !validatePincode(pincode)) {
+        return res.status(400).json({
+          error: 'Invalid PIN code. PIN code must be exactly 6 digits and cannot start with 0 (e.g. 400001).'
+        });
+      }
+      if (state) {
+        const norm = normalizeIndianState(state);
+        if (!norm) {
+          return res.status(400).json({
+            error: 'Invalid State. Please select a valid Indian State or Union Territory.'
+          });
+        }
+        state = norm;
+      }
+    }
+
     const cleanPhone = phone ? sanitize10DigitPhone(phone) : null;
+    if (cleanPhone && !/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        error: 'Invalid Phone Number. Indian mobile numbers must be 10 digits starting with 6, 7, 8, or 9.'
+      });
+    }
 
     // 1. Check if user already exists
     let existing = null;
     try {
-      const rows = await executeMySQL('SELECT id FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
+      const rows = await executeMySQL('SELECT id, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
       if (rows && rows.length > 0) existing = rows[0];
     } catch (e) {}
 
     if (!existing) {
       try {
-        const row = db.prepare('SELECT id FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
+        const row = db.prepare('SELECT id, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
         if (row) existing = row;
       } catch (e) {}
+    }
+
+    // If addresses array was not provided in request, but single fields were updated, preserve or update existing addresses
+    let addressesJsonToSave = null;
+    if (addresses !== undefined && addresses !== null) {
+      addressesJsonToSave = JSON.stringify(validatedAddresses);
+    } else if (address || city || pincode) {
+      let currentAddrs = [];
+      try {
+        if (existing && existing.addresses) {
+          currentAddrs = typeof existing.addresses === 'string' ? JSON.parse(existing.addresses) : existing.addresses;
+        }
+      } catch (e) { currentAddrs = []; }
+      if (!Array.isArray(currentAddrs)) currentAddrs = [];
+
+      if (currentAddrs.length === 0) {
+        currentAddrs.push({
+          id: 'addr_default',
+          name: name || '',
+          phone: cleanPhone || '',
+          address: address || '',
+          city: city || '',
+          state: state || 'Madhya Pradesh',
+          pincode: pincode || '',
+          type: 'Home',
+          is_default: true
+        });
+      } else {
+        // Update default address in list
+        const defIdx = currentAddrs.findIndex(a => a.is_default);
+        const targetIdx = defIdx >= 0 ? defIdx : 0;
+        currentAddrs[targetIdx] = {
+          ...currentAddrs[targetIdx],
+          address: address || currentAddrs[targetIdx].address,
+          city: city || currentAddrs[targetIdx].city,
+          state: state || currentAddrs[targetIdx].state,
+          pincode: pincode || currentAddrs[targetIdx].pincode,
+          name: name || currentAddrs[targetIdx].name,
+          phone: cleanPhone || currentAddrs[targetIdx].phone
+        };
+      }
+      addressesJsonToSave = JSON.stringify(currentAddrs);
+      validatedAddresses = currentAddrs;
     }
 
     if (!existing) {
@@ -1229,9 +1488,9 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
 
       try {
         await executeMySQL(
-          `INSERT INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1)`,
-          [userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '']
+          `INSERT INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified, addresses) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1, ?)`,
+          [userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '', addressesJsonToSave]
         );
       } catch (e) {
         try {
@@ -1244,9 +1503,9 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
 
       try {
         db.prepare(
-          `INSERT OR REPLACE INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1)`
-        ).run(userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '');
+          `INSERT OR REPLACE INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified, addresses) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1, ?)`
+        ).run(userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '', addressesJsonToSave);
       } catch (e) {}
     } else {
       // User exists: perform update in MySQL
@@ -1260,9 +1519,10 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
             state = COALESCE(?, state),
             pincode = COALESCE(?, pincode),
             gstin_number = COALESCE(?, gstin_number),
-            business_name = COALESCE(?, business_name)
+            business_name = COALESCE(?, business_name),
+            addresses = COALESCE(?, addresses)
           WHERE LOWER(email) = ? OR phone = ? OR id = ?`,
-          [name, cleanPhone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier]
+          [name, cleanPhone, address, city, state, pincode, gstin_number, business_name, addressesJsonToSave, identifier, identifier, identifier]
         );
       } catch (e) {
         try {
@@ -1284,9 +1544,10 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
             state = COALESCE(?, state),
             pincode = COALESCE(?, pincode),
             gstin_number = COALESCE(?, gstin_number),
-            business_name = COALESCE(?, business_name)
+            business_name = COALESCE(?, business_name),
+            addresses = COALESCE(?, addresses)
           WHERE LOWER(email) = ? OR phone = ? OR id = ?
-        `).run(name, cleanPhone, address, city, state, pincode, gstin_number, business_name, identifier, identifier, identifier);
+        `).run(name, cleanPhone, address, city, state, pincode, gstin_number, business_name, addressesJsonToSave, identifier, identifier, identifier);
       } catch (e) {
         try {
           db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?')
@@ -1298,20 +1559,30 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
     // Fetch updated user to return clean object
     let updated = null;
     try {
-      const rows = await executeMySQL('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
+      const rows = await executeMySQL('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
       if (rows && rows.length > 0) updated = rows[0];
     } catch (e) {}
 
     if (!updated) {
       try {
-        updated = db.prepare('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
+        updated = db.prepare('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
+      } catch (e) {}
+    }
+
+    let finalAddresses = validatedAddresses;
+    if (updated && updated.addresses) {
+      try {
+        finalAddresses = typeof updated.addresses === 'string' ? JSON.parse(updated.addresses) : updated.addresses;
       } catch (e) {}
     }
 
     res.json({ 
       success: true, 
       message: 'Profile and address updated successfully',
-      user: updated || { name, phone, address, city, state, pincode, gstin_number, business_name }
+      user: {
+        ...(updated || { name, phone, address, city, state, pincode, gstin_number, business_name }),
+        addresses: finalAddresses
+      }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

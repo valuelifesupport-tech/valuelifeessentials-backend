@@ -100,6 +100,7 @@ async function setupHostingerMySQL() {
     try { await connection.query(`ALTER TABLE users ADD COLUMN pincode VARCHAR(20) DEFAULT ''`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN gstin_number VARCHAR(50) DEFAULT ''`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN business_name VARCHAR(255) DEFAULT ''`); } catch(e){}
+        try { await connection.query('ALTER TABLE users ADD COLUMN addresses TEXT'); } catch(e){}
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS categories (

@@ -31,6 +31,7 @@ function initDb(db) {
       is_verified INTEGER DEFAULT 0,
       email_otp TEXT,
       email_otp_expires TEXT,
+      addresses TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -273,6 +274,7 @@ function initDb(db) {
   try { db.exec('ALTER TABLE users ADD COLUMN city TEXT'); } catch(e) {}
   try { db.exec('ALTER TABLE users ADD COLUMN pincode TEXT'); } catch(e) {}
   try { db.exec('ALTER TABLE users ADD COLUMN state TEXT'); } catch(e) {}
+  try { db.exec('ALTER TABLE users ADD COLUMN addresses TEXT'); } catch(e) {}
 
   // Seed default CMS pages if empty
   const pageCount = db.prepare('SELECT COUNT(*) as count FROM custom_pages').get().count;
