@@ -6,8 +6,8 @@ const { executeMySQL, db } = require('../config/database.cjs');
 const { RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET } = require('../config/constants.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
-const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
-const { sendOrderConfirmationSms } = require('../utils/sms.service.cjs');
+const { buildOrderConfirmationEmailHtml, buildAdminOrderAlertEmailHtml } = require('../utils/orderEmailTemplate.cjs');
+const { sendOrderConfirmationSms, sendAdminOrderAlertSms } = require('../utils/sms.service.cjs');
 const {
   initiatePaymentTransaction,
   recordGatewayHandshake,
@@ -375,47 +375,105 @@ router.post(['/api/payment/verify', '/api/payment/razorpay/verify'], async (req,
           remaining_amount: newRemainingAmount
         };
 
-        // DISPATCH OFFICIAL ORDER CONFIRMATION EMAIL UPON SUCCESSFUL PAYMENT
-        if (ord.customer_email && !wasAlreadyPaid) {
+        // DISPATCH CONFIRMATION & ADMIN NOTIFICATIONS UPON SUCCESSFUL PAYMENT
+        if (!wasAlreadyPaid) {
+          let orderItems = [];
           try {
-            let orderItems = [];
-            try {
-              orderItems = typeof ord.items_json === 'string' ? JSON.parse(ord.items_json) : (ord.items_json || []);
-            } catch (e) {
-              orderItems = [];
-            }
+            orderItems = typeof ord.items_json === 'string' ? JSON.parse(ord.items_json) : (ord.items_json || []);
+          } catch (e) {
+            orderItems = [];
+          }
 
-            const emailHtml = buildOrderConfirmationEmailHtml({
+          // 1. Customer Confirmation Email (if customer provided email)
+          if (ord.customer_email) {
+            try {
+              const emailHtml = buildOrderConfirmationEmailHtml({
+                orderNumber: ord.order_number,
+                customerName: ord.customer_name || 'Valued Customer',
+                paymentMode: ord.payment_mode || 'ONLINE',
+                paymentStatus: newPayStatus,
+                totalAmount: Number(ord.total_amount || 0),
+                paidAmount: newPaidAmount,
+                remainingAmount: newRemainingAmount,
+                subtotal: Number(ord.subtotal || 0),
+                discountAmount: Number(ord.discount_amount || 0),
+                shippingAmount: Number(ord.shipping_amount || 0),
+                taxAmount: Number(ord.tax_amount || 0),
+                shippingAddress: ord.shipping_address || 'Provided at checkout',
+                items: orderItems
+              });
+
+              sendEmailNotification(
+                ord.customer_email,
+                `Order Confirmed #${ord.order_number} | ValueLife Essentials`,
+                emailHtml
+              ).catch(e => console.warn('Payment verify customer email warn:', e.message));
+            } catch (emErr) {
+              console.warn('Payment confirmation customer email build error:', emErr.message);
+            }
+          }
+
+          // 2. Customer Confirmation SMS (if customer provided phone)
+          if (ord.customer_phone) {
+            sendOrderConfirmationSms(ord.customer_phone, ord.order_number, ord.total_amount, 'PAID_ONLINE').catch(e =>
+              console.warn('Payment confirmation customer SMS warn:', e.message)
+            );
+          }
+
+          // 3. STORE OWNER / ADMIN EMAIL NOTIFICATION (Always sent with full professional English details)
+          try {
+            const adminEmail = process.env.ADMIN_ALERT_EMAIL || process.env.STORE_EMAIL || 'valuelifesupport@gmail.com';
+            const adminEmailHtml = buildAdminOrderAlertEmailHtml({
               orderNumber: ord.order_number,
               customerName: ord.customer_name || 'Valued Customer',
-              paymentMode: ord.payment_mode || 'ONLINE',
-              paymentStatus: newPayStatus,
+              customerEmail: ord.customer_email || '',
+              customerPhone: ord.customer_phone || '',
+              paymentMode: ord.payment_mode || 'ONLINE_PREPAID',
+              paymentStatus: newPayStatus || 'PAID',
+              orderStatus: ord.order_status || 'PROCESSING',
               totalAmount: Number(ord.total_amount || 0),
               paidAmount: newPaidAmount,
               remainingAmount: newRemainingAmount,
               subtotal: Number(ord.subtotal || 0),
               discountAmount: Number(ord.discount_amount || 0),
+              couponCode: ord.coupon_code || '',
               shippingAmount: Number(ord.shipping_amount || 0),
               taxAmount: Number(ord.tax_amount || 0),
+              cgstAmount: Number(ord.cgst_amount || 0),
+              sgstAmount: Number(ord.sgst_amount || 0),
+              igstAmount: Number(ord.igst_amount || 0),
               shippingAddress: ord.shipping_address || 'Provided at checkout',
-              items: orderItems
+              shippingCity: ord.shipping_city || '',
+              shippingState: ord.shipping_state || ord.state_name || '',
+              shippingPincode: ord.shipping_pincode || '',
+              orderNotes: ord.order_notes || ord.remark || '',
+              items: orderItems,
+              createdAt: ord.created_at || new Date()
             });
 
             sendEmailNotification(
-              ord.customer_email,
-              `Order Confirmed #${ord.order_number} | ValueLife Essentials`,
-              emailHtml
-            ).catch(e => console.warn('Payment verify email warn:', e.message));
-          } catch (emErr) {
-            console.warn('Payment confirmation email build error:', emErr.message);
+              adminEmail,
+              `⚡ Paid Order Received: #${ord.order_number} (₹${Number(ord.total_amount || 0).toLocaleString('en-IN')} - ONLINE PREPAID)`,
+              adminEmailHtml
+            ).catch(e => console.warn('Payment verify admin email warn:', e.message));
+          } catch (admEmErr) {
+            console.warn('Payment verify admin email build error:', admEmErr.message);
           }
-        }
 
-        // Dispatch Order Confirmation SMS for paid order
-        if (ord && ord.customer_phone) {
-          sendOrderConfirmationSms(ord.customer_phone, ord.order_number, ord.total_amount, 'PAID_ONLINE').catch(e =>
-            console.warn('Payment confirmation SMS warn:', e.message)
-          );
+          // 4. STORE OWNER / ADMIN SMS ALERT (Dispatched to owner mobile e.g. 7675941899)
+          try {
+            const ownerMobile = process.env.ADMIN_ALERT_PHONE || '7675941899';
+            sendAdminOrderAlertSms({
+              ownerPhone: ownerMobile,
+              orderNumber: ord.order_number,
+              totalAmount: ord.total_amount,
+              paymentMode: 'ONLINE_PREPAID',
+              customerName: ord.customer_name,
+              customerPhone: ord.customer_phone
+            }).catch(e => console.warn('Payment verify admin SMS alert warn:', e.message));
+          } catch (admSmsErr) {
+            console.warn('Payment verify admin SMS error:', admSmsErr.message);
+          }
         }
       }
     }
@@ -466,7 +524,90 @@ router.post('/api/payment/razorpay/webhook', async (req, res) => {
 
         const targetOrderId = notes.order_id || orderId;
         if (targetOrderId) {
+          const prevRows = await executeMySQL('SELECT * FROM orders WHERE id = ? OR order_number = ? OR gateway_order_id = ? LIMIT 1', [targetOrderId, targetOrderId, orderId]);
+          const ord = prevRows && prevRows[0];
+          const wasAlreadyPaid = ord && (ord.payment_status === 'PAID' || ord.payment_status === 'COMPLETED');
+
           await executeMySQL('UPDATE orders SET payment_status = "PAID" WHERE id = ? OR order_number = ? OR gateway_order_id = ?', [targetOrderId, targetOrderId, orderId]);
+
+          // Fallback notification dispatch if customer closed browser before verify redirect
+          if (ord && !wasAlreadyPaid) {
+            let orderItems = [];
+            try {
+              orderItems = typeof ord.items_json === 'string' ? JSON.parse(ord.items_json) : (ord.items_json || []);
+            } catch (e) {
+              orderItems = [];
+            }
+
+            if (ord.customer_email) {
+              try {
+                const emailHtml = buildOrderConfirmationEmailHtml({
+                  orderNumber: ord.order_number,
+                  customerName: ord.customer_name || 'Valued Customer',
+                  paymentMode: ord.payment_mode || 'ONLINE',
+                  paymentStatus: 'PAID',
+                  totalAmount: Number(ord.total_amount || 0),
+                  paidAmount: Number(ord.total_amount || 0),
+                  remainingAmount: 0,
+                  subtotal: Number(ord.subtotal || 0),
+                  discountAmount: Number(ord.discount_amount || 0),
+                  shippingAmount: Number(ord.shipping_amount || 0),
+                  taxAmount: Number(ord.tax_amount || 0),
+                  shippingAddress: ord.shipping_address || 'Provided at checkout',
+                  items: orderItems
+                });
+                sendEmailNotification(ord.customer_email, `Order Confirmed #${ord.order_number} | ValueLife Essentials`, emailHtml).catch(e => console.warn('Webhook customer email warn:', e.message));
+              } catch (e) {}
+            }
+
+            if (ord.customer_phone) {
+              sendOrderConfirmationSms(ord.customer_phone, ord.order_number, ord.total_amount, 'PAID_ONLINE').catch(e => console.warn('Webhook customer SMS warn:', e.message));
+            }
+
+            try {
+              const adminEmail = process.env.ADMIN_ALERT_EMAIL || process.env.STORE_EMAIL || 'valuelifesupport@gmail.com';
+              const adminEmailHtml = buildAdminOrderAlertEmailHtml({
+                orderNumber: ord.order_number,
+                customerName: ord.customer_name || 'Valued Customer',
+                customerEmail: ord.customer_email || '',
+                customerPhone: ord.customer_phone || '',
+                paymentMode: ord.payment_mode || 'ONLINE_PREPAID',
+                paymentStatus: 'PAID',
+                orderStatus: ord.order_status || 'PROCESSING',
+                totalAmount: Number(ord.total_amount || 0),
+                paidAmount: Number(ord.total_amount || 0),
+                remainingAmount: 0,
+                subtotal: Number(ord.subtotal || 0),
+                discountAmount: Number(ord.discount_amount || 0),
+                couponCode: ord.coupon_code || '',
+                shippingAmount: Number(ord.shipping_amount || 0),
+                taxAmount: Number(ord.tax_amount || 0),
+                cgstAmount: Number(ord.cgst_amount || 0),
+                sgstAmount: Number(ord.sgst_amount || 0),
+                igstAmount: Number(ord.igst_amount || 0),
+                shippingAddress: ord.shipping_address || 'Provided at checkout',
+                shippingCity: ord.shipping_city || '',
+                shippingState: ord.shipping_state || ord.state_name || '',
+                shippingPincode: ord.shipping_pincode || '',
+                orderNotes: ord.order_notes || ord.remark || '',
+                items: orderItems,
+                createdAt: ord.created_at || new Date()
+              });
+              sendEmailNotification(adminEmail, `⚡ Paid Order Received: #${ord.order_number} (₹${Number(ord.total_amount || 0).toLocaleString('en-IN')} - ONLINE PREPAID)`, adminEmailHtml).catch(e => console.warn('Webhook admin email warn:', e.message));
+            } catch (e) {}
+
+            try {
+              const ownerMobile = process.env.ADMIN_ALERT_PHONE || '7675941899';
+              sendAdminOrderAlertSms({
+                ownerPhone: ownerMobile,
+                orderNumber: ord.order_number,
+                totalAmount: ord.total_amount,
+                paymentMode: 'ONLINE_PREPAID',
+                customerName: ord.customer_name,
+                customerPhone: ord.customer_phone
+              }).catch(e => console.warn('Webhook admin SMS alert warn:', e.message));
+            } catch (e) {}
+          }
         }
       } else if (event === 'payment.failed') {
         const orderId = payload?.order_id;

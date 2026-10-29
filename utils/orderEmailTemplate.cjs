@@ -302,7 +302,397 @@ function buildOrderConfirmationEmailHtml({
   `.trim();
 }
 
+/**
+ * ValueLife Essentials — High-End Admin New Order Alert Email Template (English)
+ *
+ * Professional English email dispatched to the store owner / administrator whenever
+ * an order is placed (COD) or verified (Online/Prepaid).
+ */
+function buildAdminOrderAlertEmailHtml({
+  orderNumber,
+  customerName = 'Customer',
+  customerEmail = '',
+  customerPhone = '',
+  paymentMode = 'COD',
+  paymentStatus = 'PENDING',
+  orderStatus = 'NEW',
+  totalAmount = 0,
+  paidAmount = 0,
+  remainingAmount = 0,
+  subtotal = 0,
+  discountAmount = 0,
+  couponCode = '',
+  shippingAmount = 0,
+  taxAmount = 0,
+  cgstAmount = 0,
+  sgstAmount = 0,
+  igstAmount = 0,
+  shippingAddress = '',
+  shippingCity = '',
+  shippingState = '',
+  shippingPincode = '',
+  orderNotes = '',
+  items = [],
+  createdAt = new Date()
+}) {
+  const isCOD = paymentMode === 'COD' || String(paymentMode).toUpperCase().includes('COD');
+  const isPaid = paymentStatus === 'PAID' || paymentStatus === 'COMPLETED';
+  const effectiveItems = Array.isArray(items) ? items : [];
+
+  let dateStr = '';
+  try {
+    dateStr = new Intl.DateTimeFormat('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kolkata'
+    }).format(new Date(createdAt));
+  } catch (e) {
+    dateStr = new Date().toLocaleString('en-IN');
+  }
+
+  // Build clean delivery address string
+  const addressParts = [];
+  if (shippingAddress) addressParts.push(shippingAddress.trim());
+  if (shippingCity && !shippingAddress.toLowerCase().includes(shippingCity.toLowerCase())) {
+    addressParts.push(shippingCity.trim());
+  }
+  if (shippingState && !shippingAddress.toLowerCase().includes(shippingState.toLowerCase())) {
+    const statePin = shippingPincode ? `${shippingState.trim()} - ${shippingPincode.trim()}` : shippingState.trim();
+    addressParts.push(statePin);
+  } else if (shippingPincode && !shippingAddress.includes(shippingPincode)) {
+    addressParts.push(`PIN: ${shippingPincode.trim()}`);
+  }
+  const cleanDeliveryAddress = addressParts.join(', ') || 'No address specified';
+
+  // Clean customer phone
+  const cleanDigits = String(customerPhone || '').replace(/\D/g, '');
+  const displayPhone = cleanDigits.length === 10 ? `+91 ${cleanDigits.slice(0, 5)} ${cleanDigits.slice(5)}` : (customerPhone || 'Not provided');
+  const telLink = cleanDigits.length >= 10 ? `tel:+91${cleanDigits.slice(-10)}` : '';
+
+  // Admin portal order URL
+  const adminBaseUrl = (process.env.ADMIN_URL || 'https://admin.valuelifeessentials.com').replace(/\/+$/, '');
+  const adminOrderUrl = `${adminBaseUrl}/orders`;
+
+  // Item rows
+  const itemsHtml = effectiveItems.map((it, idx) => {
+    const title = it.product_title || it.product_name || it.title || it.name || `Item #${idx + 1}`;
+    const variant = (it.variant_name || it.variant_title || '').trim();
+    const qty = parseInt(it.quantity || it.qty || 1, 10);
+    const unitPrice = Number(it.price || it.price_inr || it.unit_price || 0);
+    const lineTotal = Number(it.total || (unitPrice * qty));
+    const rawImg = it.image_url || it.thumbnail || it.image || '';
+    const imgUrl = resolveImageUrl(rawImg);
+
+    return `
+      <tr>
+        <td style="padding: 14px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; width: 64px;">
+          ${imgUrl ? `
+            <img 
+              src="${imgUrl}" 
+              alt="${title.replace(/"/g, '&quot;')}" 
+              width="58" 
+              height="58" 
+              style="width: 58px; height: 58px; object-fit: cover; border-radius: 8px; border: 1px solid #cbd5e1; display: block;" 
+            />
+          ` : `
+            <div style="width: 58px; height: 58px; background: #ecfdf5; border-radius: 8px; border: 1px solid #a7f3d0; text-align: center; line-height: 58px; font-size: 22px; color: #047857;">
+              🌿
+            </div>
+          `}
+        </td>
+        <td style="padding: 14px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: middle;">
+          <div style="font-weight: 700; color: #0f172a; font-size: 14px; line-height: 1.35; margin-bottom: 4px;">
+            ${title}
+          </div>
+          ${variant ? `
+            <div style="display: inline-block; font-size: 11px; background: #f1f5f9; color: #334155; padding: 2px 7px; border-radius: 4px; font-weight: 600; margin-bottom: 4px;">
+              Pack / Variant: ${variant}
+            </div>
+          ` : ''}
+          <div style="font-size: 12px; color: #64748b;">
+            Unit Price: <strong style="color: #1e293b;">₹${unitPrice.toLocaleString('en-IN')}</strong> &nbsp;|&nbsp; Quantity: <strong style="color: #0f172a; font-size: 13px;">${qty}</strong>
+          </div>
+        </td>
+        <td style="padding: 14px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; text-align: right; width: 100px;">
+          <div style="font-size: 15px; font-weight: 800; color: #0f172a;">
+            ₹${lineTotal.toLocaleString('en-IN')}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Order Alert #${orderNumber}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <!-- PREHEADER (Visible in inbox preview) -->
+  <div style="display: none; font-size: 1px; color: #f1f5f9; line-height: 1px; max-height: 0px; max-width: 0px; opacity: 0; overflow: hidden;">
+    🔔 New order #${orderNumber} received from ${customerName} for ₹${Number(totalAmount).toLocaleString('en-IN')} (${paymentMode}). Check details and dispatch instructions.
+  </div>
+
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 24px 12px;">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 640px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);">
+          
+          <!-- TOP BRAND & ALERT HEADER -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%); padding: 26px 30px; text-align: left;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td>
+                    <div style="display: inline-block; background: #fef08a; color: #854d0e; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">
+                      ⚡ New Order Alert
+                    </div>
+                    <div style="font-size: 22px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; font-family: -apple-system, sans-serif;">
+                      🌱 ValueLife Essentials
+                    </div>
+                    <div style="font-size: 12px; color: #a7f3d0; margin-top: 2px;">
+                      Order Received at ${dateStr}
+                    </div>
+                  </td>
+                  <td align="right" style="vertical-align: top;">
+                    <div style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 10px; padding: 8px 14px; text-align: right; display: inline-block;">
+                      <div style="font-size: 10px; color: #bbf7d0; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;">
+                        Order Number
+                      </div>
+                      <div style="font-size: 15px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px;">
+                        #${orderNumber}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- FINANCIAL HIGHLIGHT STRIP -->
+          <tr>
+            <td style="background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 18px 30px;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="width: 33.33%; border-right: 1px solid #e2e8f0; padding-right: 12px;">
+                    <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">
+                      Total Order Value
+                    </div>
+                    <div style="font-size: 20px; font-weight: 800; color: #047857; margin-top: 2px;">
+                      ₹${Number(totalAmount).toLocaleString('en-IN')}
+                    </div>
+                  </td>
+                  <td style="width: 33.33%; padding: 0 16px; border-right: 1px solid #e2e8f0;">
+                    <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">
+                      Payment Mode
+                    </div>
+                    <div style="font-size: 13px; font-weight: 800; color: #0f172a; margin-top: 4px;">
+                      ${isCOD ? 'Cash on Delivery' : 'Online / Prepaid'}
+                    </div>
+                  </td>
+                  <td style="width: 33.33%; padding-left: 16px;">
+                    <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">
+                      Payment Status
+                    </div>
+                    <div style="margin-top: 4px;">
+                      ${isPaid ? `
+                        <span style="display: inline-block; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;">
+                          ✓ Paid Online
+                        </span>
+                      ` : (isCOD ? `
+                        <span style="display: inline-block; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;">
+                          Collect ₹${Number(remainingAmount || totalAmount).toLocaleString('en-IN')}
+                        </span>
+                      ` : `
+                        <span style="display: inline-block; background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; text-transform: uppercase;">
+                          ${paymentStatus}
+                        </span>
+                      `)}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CUSTOMER DETAILS & SHIPPING INFO SECTION -->
+          <tr>
+            <td style="padding: 24px 30px 10px 30px;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <!-- CUSTOMER INFO CARD -->
+                  <td style="width: 48%; vertical-align: top; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px;">
+                    <div style="font-size: 11px; font-weight: 800; color: #047857; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">
+                      👤 Customer Information
+                    </div>
+                    <div style="font-size: 15px; font-weight: 800; color: #0f172a; margin-bottom: 6px;">
+                      ${customerName}
+                    </div>
+                    <div style="font-size: 13px; color: #334155; margin-bottom: 4px;">
+                      📞 <strong>Phone:</strong> ${telLink ? `<a href="${telLink}" style="color: #047857; font-weight: 700; text-decoration: none;">${displayPhone}</a>` : displayPhone}
+                    </div>
+                    <div style="font-size: 13px; color: #334155; margin-bottom: 6px; word-break: break-all;">
+                      ✉️ <strong>Email:</strong> ${customerEmail ? `<a href="mailto:${customerEmail}" style="color: #047857; text-decoration: underline;">${customerEmail}</a>` : '<span style="color: #94a3b8; font-style: italic;">Not provided</span>'}
+                    </div>
+                    ${telLink ? `
+                      <div style="margin-top: 10px;">
+                        <a href="${telLink}" style="display: inline-block; background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; font-size: 11.5px; font-weight: 700; padding: 5px 12px; border-radius: 6px; text-decoration: none;">
+                          📞 Call Customer
+                        </a>
+                      </div>
+                    ` : ''}
+                  </td>
+                  
+                  <td style="width: 4%;"></td>
+
+                  <!-- SHIPPING ADDRESS CARD -->
+                  <td style="width: 48%; vertical-align: top; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px;">
+                    <div style="font-size: 11px; font-weight: 800; color: #047857; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">
+                      📍 Delivery Address
+                    </div>
+                    <div style="font-size: 13px; color: #1e293b; line-height: 1.5; font-weight: 500;">
+                      ${cleanDeliveryAddress}
+                    </div>
+                    ${orderNotes ? `
+                      <div style="margin-top: 10px; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 6px; padding: 6px 10px;">
+                        <span style="font-size: 10.5px; font-weight: 800; color: #92400e; text-transform: uppercase;">Note:</span>
+                        <span style="font-size: 12px; color: #78350f;">${orderNotes}</span>
+                      </div>
+                    ` : ''}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- ORDERED ITEMS SECTION -->
+          <tr>
+            <td style="padding: 16px 30px 10px 30px;">
+              <div style="font-size: 14px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">
+                📦 Ordered Items (${effectiveItems.length})
+              </div>
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #ffffff;">
+                <thead>
+                  <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+                    <th align="left" colspan="2" style="padding: 10px 14px; font-size: 11px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">
+                      Product
+                    </th>
+                    <th align="right" style="padding: 10px 14px; font-size: 11px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">
+                      Total
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsHtml}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+
+          <!-- FINANCIAL BREAKDOWN SECTION -->
+          <tr>
+            <td style="padding: 10px 30px 24px 30px;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="width: 50%; vertical-align: top; padding-right: 14px;">
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 18px;">
+                      <div style="font-size: 12px; font-weight: 800; color: #334155; text-transform: uppercase; margin-bottom: 6px;">
+                        Quick Fulfillment Checklist
+                      </div>
+                      <div style="font-size: 12px; color: #64748b; line-height: 1.55;">
+                        1. Verify item availability in warehouse<br />
+                        2. Pack items securely with organic seal<br />
+                        3. Generate Shiprocket / courier label<br />
+                        4. Mark order as &quot;DISPATCHED&quot; in admin
+                      </div>
+                    </div>
+                  </td>
+                  <td style="width: 50%; vertical-align: top;">
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 18px;">
+                      <tr>
+                        <td style="padding: 4px 0; font-size: 12.5px; color: #64748b;">Subtotal</td>
+                        <td align="right" style="padding: 4px 0; font-size: 12.5px; color: #1e293b; font-weight: 600;">₹${Number(subtotal || 0).toLocaleString('en-IN')}</td>
+                      </tr>
+                      ${discountAmount > 0 ? `
+                        <tr>
+                          <td style="padding: 4px 0; font-size: 12.5px; color: #16a34a;">Discount ${couponCode ? `(${couponCode})` : ''}</td>
+                          <td align="right" style="padding: 4px 0; font-size: 12.5px; color: #16a34a; font-weight: 700;">-₹${Number(discountAmount).toLocaleString('en-IN')}</td>
+                        </tr>
+                      ` : ''}
+                      <tr>
+                        <td style="padding: 4px 0; font-size: 12.5px; color: #64748b;">Shipping Fee</td>
+                        <td align="right" style="padding: 4px 0; font-size: 12.5px; color: #1e293b; font-weight: 600;">
+                          ${shippingAmount > 0 ? `₹${Number(shippingAmount).toLocaleString('en-IN')}` : '<span style="color: #047857; font-weight: 700;">FREE</span>'}
+                        </td>
+                      </tr>
+                      ${taxAmount > 0 ? `
+                        <tr>
+                          <td style="padding: 4px 0; font-size: 12.5px; color: #64748b;">Taxes (GST)</td>
+                          <td align="right" style="padding: 4px 0; font-size: 12.5px; color: #1e293b; font-weight: 600;">₹${Number(taxAmount).toLocaleString('en-IN')}</td>
+                        </tr>
+                      ` : ''}
+                      <tr>
+                        <td style="padding: 10px 0 4px 0; border-top: 1px solid #e2e8f0; font-size: 14px; font-weight: 800; color: #0f172a;">Total Payable</td>
+                        <td align="right" style="padding: 10px 0 4px 0; border-top: 1px solid #e2e8f0; font-size: 17px; font-weight: 800; color: #047857;">₹${Number(totalAmount).toLocaleString('en-IN')}</td>
+                      </tr>
+                      ${isCOD ? `
+                        <tr>
+                          <td style="padding: 4px 0; font-size: 12px; color: #92400e; font-weight: 700;">Amount to Collect (COD)</td>
+                          <td align="right" style="padding: 4px 0; font-size: 13px; color: #92400e; font-weight: 800;">₹${Number(remainingAmount || totalAmount).toLocaleString('en-IN')}</td>
+                        </tr>
+                      ` : ''}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- PRIMARY CALL TO ACTION BUTTON -->
+          <tr>
+            <td style="padding: 0 30px 28px 30px; text-align: center;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center">
+                    <a 
+                      href="${adminOrderUrl}" 
+                      style="display: inline-block; background-color: #047857; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 800; padding: 14px 34px; border-radius: 10px; letter-spacing: 0.3px; box-shadow: 0 3px 8px rgba(4, 120, 87, 0.3);"
+                    >
+                      Open Order in Admin Dashboard →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <div style="margin-top: 14px; font-size: 12px; color: #64748b;">
+                Admin URL: <a href="${adminOrderUrl}" style="color: #047857; text-decoration: underline;">${adminOrderUrl}</a>
+              </div>
+            </td>
+          </tr>
+
+          <!-- CORPORATE FOOTER -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 18px 30px; text-align: center; border-top: 1px solid #e2e8f0;">
+              <p style="margin: 0; font-size: 11.5px; color: #64748b; line-height: 1.5;">
+                This is an automated notification from <strong>ValueLife Essentials Store Engine</strong>.<br />
+                ValueLife Essentials • 100% Certified Organic Living • Hyderabad, Telangana, India.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+}
+
 module.exports = {
   buildOrderConfirmationEmailHtml,
+  buildAdminOrderAlertEmailHtml,
   resolveImageUrl
 };

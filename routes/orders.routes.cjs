@@ -5,8 +5,8 @@ const { requireAdminAuth, optionalAdminAuth } = require('../middleware/auth.cjs'
 const { optionalCustomerAuth } = require('../middleware/customerAuth.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
-const { buildOrderConfirmationEmailHtml } = require('../utils/orderEmailTemplate.cjs');
-const { sendOrderConfirmationSms } = require('../utils/sms.service.cjs');
+const { buildOrderConfirmationEmailHtml, buildAdminOrderAlertEmailHtml } = require('../utils/orderEmailTemplate.cjs');
+const { sendOrderConfirmationSms, sendAdminOrderAlertSms } = require('../utils/sms.service.cjs');
 
 // Helper for strict 10-digit Indian phone normalization
 function sanitize10DigitPhone(raw) {
@@ -482,6 +482,64 @@ router.post('/api/orders', async (req, res) => {
       sendOrderConfirmationSms(rawPhone, orderNumber, totalAmount, 'COD').catch((e) =>
         console.warn('Order confirmation SMS warn:', e.message)
       );
+    }
+
+    // DISPATCH STORE OWNER / ADMIN ALERTS (EMAIL + SMS) FOR NEW COD ORDERS
+    if (effectivePaymentMode === 'COD') {
+      // 1. Admin Email Alert (Always sent to store inbox with full English order breakdown)
+      try {
+        const adminEmail = process.env.ADMIN_ALERT_EMAIL || process.env.STORE_EMAIL || 'valuelifesupport@gmail.com';
+        const adminEmailHtml = buildAdminOrderAlertEmailHtml({
+          orderNumber,
+          customerName: rawName,
+          customerEmail: rawEmail,
+          customerPhone: rawPhone,
+          paymentMode: 'COD',
+          paymentStatus: 'PENDING',
+          orderStatus: initialOrderStatus || 'NEW',
+          totalAmount,
+          paidAmount,
+          remainingAmount,
+          subtotal,
+          discountAmount: discount,
+          couponCode: coupon_code || '',
+          shippingAmount,
+          taxAmount,
+          cgstAmount,
+          sgstAmount,
+          igstAmount,
+          shippingAddress: rawAddress,
+          shippingCity: effectiveCity,
+          shippingState: effectiveState,
+          shippingPincode: effectivePincode,
+          orderNotes: effectiveNotes,
+          items: orderItems,
+          createdAt: new Date()
+        });
+
+        sendEmailNotification(
+          adminEmail,
+          `⚡ New Order Received: #${orderNumber} (₹${Number(totalAmount).toLocaleString('en-IN')} - COD)`,
+          adminEmailHtml
+        ).catch((e) => console.warn('Admin COD order alert email warn:', e.message));
+      } catch (admErr) {
+        console.warn('Failed to build admin COD order alert email:', admErr.message);
+      }
+
+      // 2. Admin SMS Alert (Dispatched to owner mobile e.g. 7675941899)
+      try {
+        const ownerMobile = process.env.ADMIN_ALERT_PHONE || '7675941899';
+        sendAdminOrderAlertSms({
+          ownerPhone: ownerMobile,
+          orderNumber,
+          totalAmount,
+          paymentMode: 'COD',
+          customerName: rawName,
+          customerPhone: rawPhone
+        }).catch((e) => console.warn('Admin COD order SMS alert warn:', e.message));
+      } catch (smsAdmErr) {
+        console.warn('Failed to dispatch admin COD order SMS:', smsAdmErr.message);
+      }
     }
 
     res.json({
