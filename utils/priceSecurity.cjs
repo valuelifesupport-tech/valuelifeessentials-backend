@@ -121,6 +121,7 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
 
     let vId = it.variant_id || it.variantId || null;
     let vName = (it.variant_name || it.variant_title || '').trim();
+    let matchedVariant = null;
 
     // 2. Fetch & Validate Variant if applicable
     if (vId || vName) {
@@ -148,6 +149,7 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
 
       if (vRows && vRows.length > 0) {
         const variant = vRows[0];
+        matchedVariant = variant;
         vId = variant.id;
         vName = variant.variant_name || variant.title || vName;
         varSku = (variant.sku || '').trim() || (vId ? `${prodSku}-VAR-${vId}` : null);
@@ -169,6 +171,19 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
     // Safety check: unit price must be positive
     if (authenticUnitPrice <= 0) {
       throw new Error(`Invalid price configuration for product "${product.title}"`);
+    }
+
+    // STRICT ZERO-TRUST INVENTORY VERIFICATION (Railway IRCTC Standard)
+    const availableStock = (matchedVariant && matchedVariant.stock !== undefined && matchedVariant.stock !== null)
+      ? Number(matchedVariant.stock)
+      : (product.stock !== undefined && product.stock !== null ? Number(product.stock) : 0);
+
+    if (availableStock <= 0) {
+      throw new Error(`"${finalTitle}" is Out of Stock. It cannot be purchased at this moment.`);
+    }
+
+    if (rawQty > availableStock) {
+      throw new Error(`Only ${availableStock} unit(s) available in stock for "${finalTitle}". You requested ${rawQty}. Please reduce your quantity.`);
     }
 
     const lineTotal = Math.round(authenticUnitPrice * rawQty * 100) / 100;
@@ -209,6 +224,7 @@ async function verifyAndCalculateOrderPricing(items = [], couponCode = null) {
       price_inr: authenticUnitPrice,
       price_usd: Math.round((authenticUnitPrice / 83) * 100) / 100,
       quantity: rawQty,
+      available_stock: availableStock,
       total: lineTotal,
       gst_percent: itemGstRate,
       gst_rate: itemGstRate,
