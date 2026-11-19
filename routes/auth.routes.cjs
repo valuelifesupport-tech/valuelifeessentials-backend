@@ -1296,6 +1296,7 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
     let { 
       name, 
       phone, 
+      email,
       address, 
       city = '', 
       state = '', 
@@ -1423,6 +1424,15 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       });
     }
 
+    let cleanEmail = null;
+    if (email && typeof email === 'string' && email.trim()) {
+      const eStr = email.trim().toLowerCase();
+      if (!eStr.includes('@') || !eStr.includes('.')) {
+        return res.status(400).json({ error: 'Please enter a valid email address.' });
+      }
+      cleanEmail = eStr;
+    }
+
     // 1. Check if user already exists
     let existing = null;
     try {
@@ -1434,6 +1444,15 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       try {
         const row = db.prepare('SELECT id, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
         if (row) existing = row;
+      } catch (e) {}
+    }
+
+    if (cleanEmail && existing && existing.id) {
+      try {
+        const checkRows = await executeMySQL('SELECT id FROM users WHERE LOWER(email) = ? AND id != ?', [cleanEmail, existing.id]);
+        if (checkRows && checkRows.length > 0) {
+          return res.status(400).json({ error: 'This email address is already in use by another account.' });
+        }
       } catch (e) {}
     }
 
@@ -1513,6 +1532,7 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
         await executeMySQL(
           `UPDATE users SET 
             name = COALESCE(?, name), 
+            email = COALESCE(?, email),
             phone = COALESCE(?, phone), 
             address = COALESCE(?, address),
             city = COALESCE(?, city),
@@ -1522,13 +1542,13 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
             business_name = COALESCE(?, business_name),
             addresses = COALESCE(?, addresses)
           WHERE LOWER(email) = ? OR phone = ? OR id = ?`,
-          [name, cleanPhone, address, city, state, pincode, gstin_number, business_name, addressesJsonToSave, identifier, identifier, identifier]
+          [name, cleanEmail, cleanPhone, address, city, state, pincode, gstin_number, business_name, addressesJsonToSave, identifier, identifier, identifier]
         );
       } catch (e) {
         try {
           await executeMySQL(
-            'UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?',
-            [name, cleanPhone, address, identifier, identifier, identifier]
+            'UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?',
+            [name, cleanEmail, cleanPhone, address, identifier, identifier, identifier]
           );
         } catch (e2) {}
       }
@@ -1538,6 +1558,7 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
         db.prepare(`
           UPDATE users SET 
             name = COALESCE(?, name), 
+            email = COALESCE(?, email),
             phone = COALESCE(?, phone), 
             address = COALESCE(?, address),
             city = COALESCE(?, city),
@@ -1547,25 +1568,26 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
             business_name = COALESCE(?, business_name),
             addresses = COALESCE(?, addresses)
           WHERE LOWER(email) = ? OR phone = ? OR id = ?
-        `).run(name, cleanPhone, address, city, state, pincode, gstin_number, business_name, addressesJsonToSave, identifier, identifier, identifier);
+        `).run(name, cleanEmail, cleanPhone, address, city, state, pincode, gstin_number, business_name, addressesJsonToSave, identifier, identifier, identifier);
       } catch (e) {
         try {
-          db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?')
-            .run(name, cleanPhone, address, identifier, identifier, identifier);
+          db.prepare('UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE LOWER(email) = ? OR phone = ? OR id = ?')
+            .run(name, cleanEmail, cleanPhone, address, identifier, identifier, identifier);
         } catch (e2) {}
       }
     }
 
     // Fetch updated user to return clean object
     let updated = null;
+    const userSearchId = existing?.id || identifier;
     try {
-      const rows = await executeMySQL('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?', [identifier, identifier, identifier]);
+      const rows = await executeMySQL('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, addresses FROM users WHERE id = ? OR LOWER(email) = ? OR phone = ?', [userSearchId, cleanEmail || identifier, identifier]);
       if (rows && rows.length > 0) updated = rows[0];
     } catch (e) {}
 
     if (!updated) {
       try {
-        updated = db.prepare('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, addresses FROM users WHERE LOWER(email) = ? OR phone = ? OR id = ?').get(identifier, identifier, identifier);
+        updated = db.prepare('SELECT id, name, email, phone, role, address, city, state, pincode, gstin_number, business_name, addresses FROM users WHERE id = ? OR LOWER(email) = ? OR phone = ?').get(userSearchId, cleanEmail || identifier, identifier);
       } catch (e) {}
     }
 
@@ -1576,11 +1598,19 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       } catch (e) {}
     }
 
+    let newToken = null;
+    if (updated) {
+      try {
+        newToken = generateCustomerToken(updated);
+      } catch (e) {}
+    }
+
     res.json({ 
       success: true, 
       message: 'Profile and address updated successfully',
+      token: newToken,
       user: {
-        ...(updated || { name, phone, address, city, state, pincode, gstin_number, business_name }),
+        ...(updated || { name, email: cleanEmail, phone: cleanPhone, address, city, state, pincode, gstin_number, business_name }),
         addresses: finalAddresses
       }
     });
