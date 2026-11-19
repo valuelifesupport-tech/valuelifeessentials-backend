@@ -20,6 +20,26 @@ function sanitize10DigitPhone(raw) {
   return digits.slice(-10);
 }
 
+// In-memory short-lived cache (5 seconds) for customer order history to prevent database hammering & rate limits
+const customerOrdersCache = new Map();
+function getCachedOrders(key) {
+  const entry = customerOrdersCache.get(key);
+  if (entry && (Date.now() - entry.timestamp < 5000)) {
+    return entry.data;
+  }
+  return null;
+}
+function setCachedOrders(key, data) {
+  customerOrdersCache.set(key, { timestamp: Date.now(), data });
+  if (customerOrdersCache.size > 200) {
+    const oldestKey = customerOrdersCache.keys().next().value;
+    customerOrdersCache.delete(oldestKey);
+  }
+}
+function clearCustomerOrdersCache() {
+  customerOrdersCache.clear();
+}
+
 // Helper to attach items to an array of orders or single order and ensure SKUs are populated
 async function enrichOrdersWithItems(orders) {
   if (!orders || orders.length === 0) return [];
@@ -542,6 +562,7 @@ router.post('/api/orders', async (req, res) => {
       }
     }
 
+    clearCustomerOrdersCache();
     res.json({
       success: true,
       order_id: newOrderId,
@@ -743,6 +764,7 @@ router.put([
       ).catch(() => {});
     }
 
+    clearCustomerOrdersCache();
     res.json({ success: true, id, order: updated ? updated[0] : null });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -819,6 +841,7 @@ router.post(['/api/orders/:id/cancel', '/api/orders/cancel/:id'], optionalAdminA
       }
     } catch (e) {}
 
+    clearCustomerOrdersCache();
     res.json({ success: true, message: 'Order cancelled and stock restored successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -897,6 +920,15 @@ router.get('/api/users/:email/orders', optionalAdminAuth, optionalCustomerAuth, 
       }
     }
 
+    // Check in-memory short-lived cache to protect against rapid client loops
+    const cacheKey = `${queryUserId || ''}_${emailToMatch || ''}_${cleanPhoneDigits || ''}_${paramVal || ''}`;
+    if (cacheKey.replace(/_/g, '')) {
+      const cached = getCachedOrders(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     let orders = [];
 
     // 1. Query MySQL
@@ -941,6 +973,9 @@ router.get('/api/users/:email/orders', optionalAdminAuth, optionalCustomerAuth, 
 
     // CRITICAL: Attach items to each order so the user sees ordered products & images
     const enrichedOrders = await enrichOrdersWithItems(orders);
+    if (cacheKey.replace(/_/g, '')) {
+      setCachedOrders(cacheKey, enrichedOrders);
+    }
     res.json(enrichedOrders);
   } catch (err) {
     console.error('Customer orders fetch error:', err);
