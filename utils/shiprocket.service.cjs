@@ -5,6 +5,7 @@ let cachedToken = null;
 let tokenExpiresAt = 0;
 
 const SHIPROCKET_BASE_URL = 'https://apiv2.shiprocket.in/v1/external';
+const { getStateFromPincode } = require('./pincode.cjs');
 
 class ShiprocketService {
   constructor() {
@@ -135,9 +136,10 @@ class ShiprocketService {
     const cleanPhone = String(order.customer_phone || '').replace(/\D/g, '').slice(-10) || '9876543210';
     
     const pincodeMatch = rawAddress.match(/\b\d{6}\b/);
-    const billingPincode = order.shipping_pincode || (pincodeMatch ? pincodeMatch[0] : (order.pincode || '400001'));
-    const billingCity = order.shipping_city || order.city || 'Mumbai';
-    const billingState = order.shipping_state || order.state_name || 'Maharashtra';
+    const billingPincode = order.shipping_pincode || (pincodeMatch ? pincodeMatch[0] : (order.pincode || ''));
+    const billingCity = order.shipping_city || order.city || '';
+    const autoSt = getStateFromPincode(billingPincode);
+    const billingState = order.shipping_state || order.state_name || autoSt || '';
 
     const nameParts = (order.customer_name || 'Valued Customer').trim().split(/\s+/);
     const firstName = nameParts[0] || 'Valued';

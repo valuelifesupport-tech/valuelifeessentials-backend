@@ -43,7 +43,7 @@ function computeOrderTaxMetrics(orders = []) {
       orderTaxStatus = 'COLLECTED';
     }
 
-    const stateName = (ord.state_name || '').trim();
+    const stateName = (ord.shipping_state || ord.state_name || '').trim();
     const isIntraState = !stateName || stateName.toLowerCase() === storeBaseState;
 
     const totalAmount = Number(ord.total_amount || 0);
@@ -126,7 +126,7 @@ function computeOrderTaxMetrics(orders = []) {
       customer_email: ord.customer_email || '',
       customer_gstin: ord.customer_gstin || '',
       shipping_address: ord.shipping_address || '',
-      state_name: ord.state_name || 'Maharashtra',
+      state_name: ord.shipping_state || ord.state_name || '',
       is_intra_state: isIntraState,
       tax_type: isIntraState ? 'INTRA-STATE (CGST + SGST)' : 'INTER-STATE (IGST)',
       taxable_value: Math.round(taxableValue * 100) / 100,

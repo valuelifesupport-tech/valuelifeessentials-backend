@@ -7,6 +7,7 @@ const { sendEmailNotification } = require('../config/email.cjs');
 const { verifyAndCalculateOrderPricing } = require('../utils/priceSecurity.cjs');
 const { buildOrderConfirmationEmailHtml, buildAdminOrderAlertEmailHtml } = require('../utils/orderEmailTemplate.cjs');
 const { sendOrderConfirmationSms, sendAdminOrderAlertSms } = require('../utils/sms.service.cjs');
+const { getStateFromPincode } = require('../utils/pincode.cjs');
 
 // Helper for strict 10-digit Indian phone normalization
 function sanitize10DigitPhone(raw) {
@@ -226,9 +227,16 @@ router.post('/api/orders', async (req, res) => {
     const rawEmail = (customer_email || '').trim().toLowerCase();
     const hasValidEmail = Boolean(rawEmail && rawEmail.includes('@') && !rawEmail.includes('@valuelifeessentials.com'));
     const cleanCustomerEmail = hasValidEmail ? rawEmail : null;
-    const effectiveState = (shipping_state || state_name || '').trim() || 'Maharashtra';
     const pinMatch = rawAddress.match(/\b\d{6}\b/);
     const effectivePincode = (shipping_pincode || (pinMatch ? pinMatch[0] : '')).trim();
+    const detectedState = getStateFromPincode(effectivePincode);
+    let effectiveState = (shipping_state || state_name || '').trim();
+    if (detectedState) {
+      if (!effectiveState || (effectiveState.toLowerCase() === 'maharashtra' && detectedState.toLowerCase() !== 'maharashtra')) {
+        effectiveState = detectedState;
+      }
+    }
+    if (!effectiveState) effectiveState = detectedState || '';
     const effectiveCity = (shipping_city || '').trim();
 
     if (!rawName || !rawPhone || rawPhone.length !== 10 || !rawAddress || !Array.isArray(items) || items.length === 0) {
@@ -691,7 +699,12 @@ router.put([
 
     // If state updated, adjust tax breakdown
     if (effectiveState) {
-      const isIntra = effectiveState.trim().toLowerCase() === 'maharashtra';
+      let storeBaseState = process.env.STORE_STATE || 'Telangana';
+      try {
+        const sRow = await executeMySQL('SELECT store_state FROM store_settings WHERE id = 1');
+        if (sRow && sRow[0] && sRow[0].store_state) storeBaseState = sRow[0].store_state.trim();
+      } catch (e) {}
+      const isIntra = effectiveState.trim().toLowerCase() === storeBaseState.toLowerCase();
       const ordRows = await executeMySQL('SELECT tax_amount FROM orders WHERE id = ? OR order_number = ?', [id, id]);
       const taxAmt = Number(ordRows && ordRows[0] ? ordRows[0].tax_amount : 0);
       if (taxAmt > 0) {

@@ -8,6 +8,7 @@ const { generateCustomerToken, requireCustomerAuth, optionalCustomerAuth } = req
 const rateLimiter = require('../middleware/rateLimiter.cjs');
 const { sendEmailNotification } = require('../config/email.cjs');
 const { sendSmsNotification, cleanIndianPhone, verifyTwoFactorOtp } = require('../utils/sms.service.cjs');
+const { getStateFromPincode } = require('../utils/pincode.cjs');
 
 // In-memory OTP cache fallback
 const otpStore = new Map(); // key: email/phone, value: { otp, expiresAt, userData }
@@ -1527,11 +1528,14 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
         ? String(name).trim() 
         : null;
 
+      const autoSt = getStateFromPincode(pincode);
+      const effectiveUserState = state || autoSt || '';
+
       try {
         await executeMySQL(
           `INSERT INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified, addresses) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1, ?)`,
-          [userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '', addressesJsonToSave]
+          [userName, userEmail, userPhone, address || '', city || '', effectiveUserState, pincode || '', gstin_number || '', business_name || '', addressesJsonToSave]
         );
       } catch (e) {
         try {
@@ -1546,7 +1550,7 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
         db.prepare(
           `INSERT OR REPLACE INTO users (name, email, phone, address, city, state, pincode, gstin_number, business_name, role, is_verified, addresses) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOMER', 1, ?)`
-        ).run(userName, userEmail, userPhone, address || '', city || '', state || 'Maharashtra', pincode || '', gstin_number || '', business_name || '', addressesJsonToSave);
+        ).run(userName, userEmail, userPhone, address || '', city || '', effectiveUserState, pincode || '', gstin_number || '', business_name || '', addressesJsonToSave);
       } catch (e) {}
     } else {
       // User exists: perform update in MySQL
@@ -1893,7 +1897,7 @@ router.post('/api/auth/reset-password', async (req, res) => {
       role: user.role || 'CUSTOMER',
       address: user.address || '',
       city: user.city || '',
-      state: user.state || 'Maharashtra',
+      state: user.state || '',
       pincode: user.pincode || '',
       is_verified: 1
     };

@@ -24,7 +24,7 @@ function initDb(db) {
       role TEXT DEFAULT 'CUSTOMER',
       address TEXT,
       city TEXT DEFAULT '',
-      state TEXT DEFAULT 'Maharashtra',
+      state TEXT DEFAULT '',
       pincode TEXT DEFAULT '',
       gstin_number TEXT DEFAULT '',
       business_name TEXT DEFAULT '',
@@ -637,7 +637,7 @@ function initDb(db) {
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN address_line1 TEXT`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN address_line2 TEXT`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN city TEXT DEFAULT ''`); } catch (e) {}
-  try { db.exec(`ALTER TABLE store_settings ADD COLUMN state TEXT DEFAULT 'Maharashtra'`); } catch (e) {}
+  try { db.exec(`ALTER TABLE store_settings ADD COLUMN state TEXT DEFAULT 'Telangana'`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN country TEXT DEFAULT 'India'`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN pincode TEXT DEFAULT ''`); } catch (e) {}
   try { db.exec(`ALTER TABLE store_settings ADD COLUMN instagram_url TEXT`); } catch (e) {}

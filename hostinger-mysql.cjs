@@ -96,7 +96,7 @@ async function setupHostingerMySQL() {
     try { await connection.query(`ALTER TABLE users ADD COLUMN email_otp VARCHAR(50)`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN email_otp_expires VARCHAR(50)`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN city VARCHAR(255) DEFAULT ''`); } catch(e){}
-    try { await connection.query(`ALTER TABLE users ADD COLUMN state VARCHAR(255) DEFAULT 'Maharashtra'`); } catch(e){}
+    try { await connection.query(`ALTER TABLE users ADD COLUMN state VARCHAR(255) DEFAULT ''`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN pincode VARCHAR(20) DEFAULT ''`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN gstin_number VARCHAR(50) DEFAULT ''`); } catch(e){}
     try { await connection.query(`ALTER TABLE users ADD COLUMN business_name VARCHAR(255) DEFAULT ''`); } catch(e){}
