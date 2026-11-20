@@ -25,6 +25,47 @@ function sanitize10DigitPhone(raw) {
   return cleanIndianPhone(raw);
 }
 
+// Global Customer User Object Sanitizer
+// Ensures no fake placeholder emails (@valuelifeessentials.com) or placeholder names (Customer XXXX) are ever exposed
+function sanitizeCustomerUser(u) {
+  if (!u) return null;
+  const rawEmail = u.email ? String(u.email).trim() : '';
+  const isDummyEmail = !rawEmail || 
+    rawEmail.toLowerCase().includes('@valuelifeessentials.com') || 
+    rawEmail.toLowerCase().includes('@temporary.com') || 
+    rawEmail.toLowerCase().includes('@mobile.');
+  const rawName = u.name ? String(u.name).trim() : '';
+  const isDummyName = !rawName || 
+    rawName.toLowerCase().startsWith('customer ') || 
+    rawName.toLowerCase().startsWith('customer_');
+
+  let parsedAddresses = u.addresses || [];
+  if (typeof parsedAddresses === 'string') {
+    try {
+      parsedAddresses = JSON.parse(parsedAddresses);
+    } catch (e) {
+      parsedAddresses = [];
+    }
+  }
+  if (!Array.isArray(parsedAddresses)) parsedAddresses = [];
+
+  return {
+    id: u.id,
+    name: isDummyName ? '' : rawName,
+    email: isDummyEmail ? '' : rawEmail,
+    phone: u.phone || '',
+    role: u.role || 'CUSTOMER',
+    address: u.address || '',
+    city: u.city || '',
+    state: u.state || 'Madhya Pradesh',
+    pincode: u.pincode || '',
+    gstin_number: u.gstin_number || '',
+    business_name: u.business_name || '',
+    is_verified: u.is_verified ?? 1,
+    addresses: parsedAddresses
+  };
+}
+
 // POST Admin Login
 router.post('/api/admin/login', rateLimiter(10, 60000), async (req, res) => {
   try {
@@ -278,10 +319,8 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
     const cleanPhone = sanitize10DigitPhone(phone || email);
-    const hasEmail = Boolean(email && String(email).trim() && String(email).includes('@'));
-    const cleanEmail = hasEmail 
-      ? String(email).trim().toLowerCase() 
-      : (cleanPhone ? `${cleanPhone}@valuelifeessentials.com` : '');
+    const hasEmail = Boolean(email && String(email).trim() && String(email).includes('@') && !String(email).includes('@valuelifeessentials.com'));
+    const cleanEmail = hasEmail ? String(email).trim().toLowerCase() : null;
 
     if (!cleanEmail && !cleanPhone) {
       return res.status(400).json({ error: 'Valid mobile phone number or email address is required.' });
@@ -291,15 +330,17 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
       ? String(password).trim()
       : `VLE_${crypto.randomBytes(8).toString('hex')}`;
 
-    const cleanName = (name && String(name).trim()) ? String(name).trim() : (cleanPhone ? `Customer ${cleanPhone.slice(-4)}` : cleanEmail.split('@')[0]);
+    const cleanName = (name && String(name).trim() && !String(name).trim().startsWith('Customer ')) 
+      ? String(name).trim() 
+      : null;
     const passwordHash = hashPassword(effectivePassword);
 
     // 1. Check if verified user already exists
     let existing = null;
     try {
       const myRows = await executeMySQL(
-        'SELECT id, is_verified FROM users WHERE LOWER(email) = ? OR (phone != "" AND phone = ?)', 
-        [cleanEmail, cleanPhone || 'NON_EXISTENT']
+        'SELECT id, is_verified FROM users WHERE (email IS NOT NULL AND LOWER(email) = ?) OR (phone != "" AND phone = ?)', 
+        [cleanEmail || 'NON_EXISTENT_EMAIL', cleanPhone || 'NON_EXISTENT_PHONE']
       );
       if (myRows && myRows.length > 0) existing = myRows[0];
     } catch (e) {}
@@ -307,8 +348,8 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
     if (!existing) {
       try {
         const sqRow = db.prepare(
-          'SELECT id, is_verified FROM users WHERE LOWER(email) = ? OR (phone != "" AND phone = ?)'
-        ).get(cleanEmail, cleanPhone || 'NON_EXISTENT');
+          'SELECT id, is_verified FROM users WHERE (email IS NOT NULL AND LOWER(email) = ?) OR (phone != "" AND phone = ?)'
+        ).get(cleanEmail || 'NON_EXISTENT_EMAIL', cleanPhone || 'NON_EXISTENT_PHONE');
         if (sqRow) existing = sqRow;
       } catch (e) {}
     }
@@ -353,7 +394,7 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
       } catch (e) {}
     }
 
-    console.log(`🔑 Registration OTP for ${cleanEmail}: [${otp}]`);
+    console.log(`🔑 Registration OTP for ${cleanEmail || cleanPhone}: [${otp}]`);
 
     // 3. Send SMS and/or Email OTP
     let smsSent = false;
@@ -370,12 +411,14 @@ router.post('/api/auth/register', rateLimiter(15, 60000), async (req, res) => {
     }
 
     // In-memory cache fallback
-    otpStore.set(cleanEmail, {
-      otp,
-      twoFactorSessionId,
-      expiresAt: Number(expiresAt),
-      userData: { id: userId, name: cleanName, email: cleanEmail, phone: cleanPhone, passwordHash }
-    });
+    if (cleanEmail) {
+      otpStore.set(cleanEmail, {
+        otp,
+        twoFactorSessionId,
+        expiresAt: Number(expiresAt),
+        userData: { id: userId, name: cleanName, email: cleanEmail, phone: cleanPhone, passwordHash }
+      });
+    }
     if (cleanPhone) {
       otpStore.set(cleanPhone, {
         otp,
@@ -735,20 +778,11 @@ router.post('/api/auth/login', rateLimiter(20, 60000), async (req, res) => {
       } catch (e) {}
     }
 
-    const customerUser = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      role: user.role || 'CUSTOMER',
+    const customerUser = sanitizeCustomerUser({
+      ...user,
       address: userAddress,
-      city: user.city || '',
-      state: user.state || 'Madhya Pradesh',
-      pincode: user.pincode || '',
-      gstin_number: user.gstin_number || '',
-      business_name: user.business_name || '',
       is_verified: 1
-    };
+    });
 
     const token = generateCustomerToken(customerUser);
     customerUser.token = token;
@@ -949,8 +983,8 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
 
     // 3. User Resolution: If user exists, activate; if new, auto-create
     if (!user) {
-      const newName = isPhone ? `Customer ${cleanPhone.slice(-4)}` : target.split('@')[0];
-      const newEmail = isPhone ? `${cleanPhone}@valuelifeessentials.com` : target;
+      const newName = isPhone ? null : (target.includes('@') ? target.split('@')[0] : null);
+      const newEmail = isPhone ? null : target;
       const newPhone = isPhone ? cleanPhone : '';
       const dummyPass = hashPassword(crypto.randomBytes(12).toString('hex'));
 
@@ -1008,20 +1042,12 @@ router.post(['/api/auth/verify-login-otp', '/api/auth/verify-otp'], rateLimiter(
       } catch (e) {}
     }
 
-    const customerUser = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
+    const customerUser = sanitizeCustomerUser({
+      ...user,
       phone: user.phone || (isPhone ? cleanPhone : ''),
-      role: user.role || 'CUSTOMER',
       address: userAddress,
-      city: user.city || '',
-      state: user.state || 'Madhya Pradesh',
-      pincode: user.pincode || '',
-      gstin_number: user.gstin_number || '',
-      business_name: user.business_name || '',
       is_verified: 1
-    };
+    });
 
     const token = generateCustomerToken(customerUser);
     customerUser.token = token;
@@ -1205,21 +1231,12 @@ router.get('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       });
     }
 
-    res.json({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      phone: u.phone || '',
-      role: u.role || 'CUSTOMER',
-      address: u.address || '',
-      city: u.city || '',
-      state: u.state || 'Madhya Pradesh',
-      pincode: u.pincode || '',
-      gstin_number: u.gstin_number || '',
-      business_name: u.business_name || '',
-      is_verified: u.is_verified ?? 1,
+    const cleanProfile = sanitizeCustomerUser({
+      ...u,
       addresses: parsedAddresses
     });
+
+    res.json(cleanProfile);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1246,8 +1263,10 @@ router.post('/api/auth/token', requireCustomerAuth, async (req, res) => {
     }
 
     const u = users[0];
-    const token = generateCustomerToken(u);
-    res.json({ success: true, token, user: { ...u, token } });
+    const cleanUser = sanitizeCustomerUser(u);
+    const token = generateCustomerToken(cleanUser);
+    cleanUser.token = token;
+    res.json({ success: true, token, user: cleanUser });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1501,9 +1520,12 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
 
     if (!existing) {
       // User doesn't exist yet: insert fresh record
-      const userEmail = identifier.includes('@') ? identifier : (req.body.email || `${identifier}@valuelifeessentials.com`);
+      const hasValidEmail = Boolean(req.body.email && String(req.body.email).includes('@') && !String(req.body.email).includes('@valuelifeessentials.com'));
+      const userEmail = identifier.includes('@') ? identifier : (hasValidEmail ? String(req.body.email).trim().toLowerCase() : null);
       const userPhone = cleanPhone || (!identifier.includes('@') ? sanitize10DigitPhone(identifier) : '');
-      const userName = name || userEmail.split('@')[0];
+      const userName = (name && String(name).trim() && !String(name).trim().startsWith('Customer ')) 
+        ? String(name).trim() 
+        : null;
 
       try {
         await executeMySQL(
@@ -1605,14 +1627,16 @@ router.put('/api/users/:email/profile', optionalAdminAuth, optionalCustomerAuth,
       } catch (e) {}
     }
 
+    const userObjToReturn = sanitizeCustomerUser({
+      ...(updated || { name, email: cleanEmail, phone: cleanPhone, address, city, state, pincode, gstin_number, business_name }),
+      addresses: finalAddresses
+    });
+
     res.json({ 
       success: true, 
       message: 'Profile and address updated successfully',
       token: newToken,
-      user: {
-        ...(updated || { name, email: cleanEmail, phone: cleanPhone, address, city, state, pincode, gstin_number, business_name }),
-        addresses: finalAddresses
-      }
+      user: userObjToReturn
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1743,14 +1767,14 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
 
     // 1. Send Email Notification if email is present
     let emailSent = false;
-    if (user.email && user.email.includes('@') && !user.email.includes('@mobile.valuelifeessentials.com')) {
+    if (user.email && user.email.includes('@') && !user.email.includes('@valuelifeessentials.com')) {
       emailSent = await sendEmailNotification(
         user.email,
         'ValueLife Password Reset Code',
         `<div style="font-family: Arial, sans-serif; padding: 25px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; max-width: 500px; margin: 0 auto;">
           <h2 style="color: #164e3f; margin: 0;">🌿 ValueLife Essentials</h2>
           <h3 style="color: #1e293b; margin-top: 10px;">Password Reset Request</h3>
-          <p style="font-size: 14px; color: #475569;">Hello <strong>${user.name}</strong>,</p>
+          <p style="font-size: 14px; color: #475569;">Hello <strong>${(user.name && !user.name.startsWith('Customer ')) ? user.name : 'Customer'}</strong>,</p>
           <p style="font-size: 14px; color: #475569;">Your 6-digit password reset code is:</p>
           <div style="font-size: 34px; font-weight: 900; color: #164e3f; background: #f0fdf4; border: 2px dashed #164e3f; padding: 18px 24px; text-align: center; border-radius: 14px; letter-spacing: 8px; margin: 24px 0; font-family: monospace;">
             ${otp}

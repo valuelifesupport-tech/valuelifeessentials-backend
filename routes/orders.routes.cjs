@@ -224,6 +224,8 @@ router.post('/api/orders', async (req, res) => {
     const rawPhone = sanitize10DigitPhone(customer_phone);
     const rawAddress = (shipping_address || '').trim();
     const rawEmail = (customer_email || '').trim().toLowerCase();
+    const hasValidEmail = Boolean(rawEmail && rawEmail.includes('@') && !rawEmail.includes('@valuelifeessentials.com'));
+    const cleanCustomerEmail = hasValidEmail ? rawEmail : null;
     const effectiveState = (shipping_state || state_name || '').trim() || 'Maharashtra';
     const pinMatch = rawAddress.match(/\b\d{6}\b/);
     const effectivePincode = (shipping_pincode || (pinMatch ? pinMatch[0] : '')).trim();
@@ -295,8 +297,8 @@ router.post('/api/orders', async (req, res) => {
         const rows = await executeMySQL('SELECT id FROM users WHERE id = ?', [finalUserId]);
         if (rows && rows.length > 0) existingUser = rows[0];
       }
-      if (!existingUser && rawEmail) {
-        const rows = await executeMySQL('SELECT id FROM users WHERE LOWER(email) = ?', [rawEmail]);
+      if (!existingUser && cleanCustomerEmail) {
+        const rows = await executeMySQL('SELECT id FROM users WHERE LOWER(email) = ?', [cleanCustomerEmail]);
         if (rows && rows.length > 0) existingUser = rows[0];
       }
       if (!existingUser && rawPhone) {
@@ -310,7 +312,7 @@ router.post('/api/orders', async (req, res) => {
         const custHash = 'cust_' + Date.now().toString(36);
         const insUserRes = await executeMySQL(
           'INSERT INTO users (name, email, phone, password, address, city, state, pincode, role, is_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "CUSTOMER", 1, NOW())',
-          [rawName, rawEmail || null, rawPhone, custHash, rawAddress, effectiveCity, effectiveState, effectivePincode]
+          [rawName, cleanCustomerEmail, rawPhone, custHash, rawAddress, effectiveCity, effectiveState, effectivePincode]
         );
         if (insUserRes && insUserRes.insertId) {
           finalUserId = insUserRes.insertId;
@@ -320,7 +322,7 @@ router.post('/api/orders', async (req, res) => {
 
         try {
           db.prepare('INSERT OR IGNORE INTO users (id, name, email, phone, address, city, state, pincode, role, is_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "CUSTOMER", 1, datetime("now"))')
-            .run(finalUserId, rawName, rawEmail || null, rawPhone, rawAddress, effectiveCity, effectiveState, effectivePincode);
+            .run(finalUserId, rawName, cleanCustomerEmail, rawPhone, rawAddress, effectiveCity, effectiveState, effectivePincode);
         } catch (e) {}
       } else {
         finalUserId = existingUser.id;
@@ -377,7 +379,7 @@ router.post('/api/orders', async (req, res) => {
     `;
 
     const insertParams = [
-      orderNumber, rawName, rawEmail, rawPhone,
+      orderNumber, rawName, cleanCustomerEmail || '', rawPhone,
       rawAddress, effectiveCity, effectiveState, effectivePincode, country, currency, totalAmount, paidAmount,
       remainingAmount, effectivePaymentMode,
       initialPaymentStatus,
