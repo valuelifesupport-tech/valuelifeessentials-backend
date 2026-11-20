@@ -1739,8 +1739,22 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
     }
 
     const user = users[0];
+    const targetPhone = user.phone || cleanPhone || '';
+    const cleanEmail = (user.email || '').toLowerCase();
+
+    // Anti-Spam Debounce: Enforce 60 seconds cooldown between OTP dispatch calls
+    const existingEntry = (targetPhone ? otpStore.get(`reset_${targetPhone}`) : null) || 
+                          (cleanEmail ? otpStore.get(`reset_${cleanEmail}`) : null);
+    if (existingEntry && existingEntry.sentAt && (Date.now() - existingEntry.sentAt < 60000)) {
+      const waitSec = Math.ceil((60000 - (Date.now() - existingEntry.sentAt)) / 1000);
+      return res.status(429).json({ 
+        error: `Please wait ${waitSec} seconds before requesting a new OTP.` 
+      });
+    }
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = String(Date.now() + 10 * 60 * 1000);
+    const nowTs = Date.now();
+    const expiresAt = String(nowTs + 10 * 60 * 1000);
 
     try {
       await executeMySQL('UPDATE users SET email_otp = ?, email_otp_expires = ? WHERE id = ?', [otp, expiresAt, user.id]);
@@ -1751,8 +1765,8 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
 
     let smsSent = false;
     let twoFactorSessionId = null;
-    if (user.phone || cleanPhone) {
-      const smsRes = await sendSmsNotification(user.phone || cleanPhone, otp, 'FORGOT_PASSWORD').catch(e => {
+    if (targetPhone) {
+      const smsRes = await sendSmsNotification(targetPhone, otp, 'FORGOT_PASSWORD').catch(e => {
         console.warn('SMS notice:', e.message);
         return { success: false };
       });
@@ -1762,10 +1776,9 @@ router.post('/api/auth/forgot-password', rateLimiter(10, 60000), async (req, res
       }
     }
 
-    const cleanEmail = (user.email || '').toLowerCase();
-    if (cleanEmail) otpStore.set(`reset_${cleanEmail}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
-    if (user.phone) otpStore.set(`reset_${user.phone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
-    if (cleanPhone) otpStore.set(`reset_${cleanPhone}`, { otp, twoFactorSessionId, expiresAt: Number(expiresAt), userId: user.id });
+    if (cleanEmail) otpStore.set(`reset_${cleanEmail}`, { otp, twoFactorSessionId, sentAt: nowTs, expiresAt: Number(expiresAt), userId: user.id });
+    if (user.phone) otpStore.set(`reset_${user.phone}`, { otp, twoFactorSessionId, sentAt: nowTs, expiresAt: Number(expiresAt), userId: user.id });
+    if (cleanPhone) otpStore.set(`reset_${cleanPhone}`, { otp, twoFactorSessionId, sentAt: nowTs, expiresAt: Number(expiresAt), userId: user.id });
 
     console.log(`🔑 Password reset OTP for ${user.email} (${user.phone}): [${otp}]`);
 
