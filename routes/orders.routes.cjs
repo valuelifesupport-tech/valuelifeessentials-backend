@@ -228,19 +228,61 @@ router.post('/api/orders', async (req, res) => {
     const hasValidEmail = Boolean(rawEmail && rawEmail.includes('@') && !rawEmail.includes('@valuelifeessentials.com'));
     const cleanCustomerEmail = hasValidEmail ? rawEmail : null;
     const pinMatch = rawAddress.match(/\b\d{6}\b/);
-    const effectivePincode = (shipping_pincode || (pinMatch ? pinMatch[0] : '')).trim();
-    const detectedState = getStateFromPincode(effectivePincode);
+    let effectivePincode = (shipping_pincode || (pinMatch ? pinMatch[0] : '')).trim();
+    let effectiveCity = (shipping_city || '').trim();
     let effectiveState = (shipping_state || state_name || '').trim();
+
+    // If address details are missing from payload, recover from user profile in database
+    if (!effectivePincode || !effectiveCity || !effectiveState) {
+      try {
+        const uRows = await executeMySQL(
+          'SELECT address, city, state, pincode, addresses FROM users WHERE id = ? OR phone = ? LIMIT 1',
+          [user_id || 0, rawPhone]
+        );
+        if (uRows && uRows.length > 0) {
+          const u = uRows[0];
+          if (!effectivePincode && u.pincode) effectivePincode = String(u.pincode).trim();
+          if (!effectiveCity && u.city) effectiveCity = String(u.city).trim();
+          if (!effectiveState && u.state) effectiveState = String(u.state).trim();
+
+          if ((!effectivePincode || !effectiveCity || !effectiveState) && u.addresses) {
+            try {
+              const addrs = typeof u.addresses === 'string' ? JSON.parse(u.addresses) : u.addresses;
+              if (Array.isArray(addrs) && addrs.length > 0) {
+                const def = addrs.find(a => a.is_default) || addrs[0];
+                if (!effectivePincode && def.pincode) effectivePincode = String(def.pincode).trim();
+                if (!effectiveCity && def.city) effectiveCity = String(def.city).trim();
+                if (!effectiveState && def.state) effectiveState = String(def.state).trim();
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+
+    const detectedState = getStateFromPincode(effectivePincode);
     if (detectedState) {
       if (!effectiveState || (effectiveState.toLowerCase() === 'maharashtra' && detectedState.toLowerCase() !== 'maharashtra')) {
         effectiveState = detectedState;
       }
     }
     if (!effectiveState) effectiveState = detectedState || '';
-    const effectiveCity = (shipping_city || '').trim();
 
+    // Enforce strict field requirements
     if (!rawName || !rawPhone || rawPhone.length !== 10 || !rawAddress || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Valid customer name, 10-digit mobile number, shipping address, and items are mandatory.' });
+      return res.status(400).json({ error: 'Valid customer name, 10-digit mobile number, street address, and items are mandatory.' });
+    }
+
+    if (!effectivePincode || !/^[1-9][0-9]{5}$/.test(effectivePincode)) {
+      return res.status(400).json({ error: 'A valid 6-digit Indian delivery PIN code is strictly mandatory.' });
+    }
+
+    if (!effectiveCity || effectiveCity.length < 2) {
+      return res.status(400).json({ error: 'Delivery city / district is strictly mandatory.' });
+    }
+
+    if (!effectiveState || effectiveState.length < 2) {
+      return res.status(400).json({ error: 'Delivery state / union territory is strictly mandatory.' });
     }
 
     // Determine payment mode & notes
