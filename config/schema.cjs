@@ -496,10 +496,12 @@ function initDb(db) {
       'Uttar Pradesh', 'Uttarakhand', 'West Bengal'
     ];
 
+    const homeState = process.env.STORE_STATE || 'Telangana';
     const stmt = db.prepare('INSERT INTO state_tax_rates (state_name, tax_rate, tax_label, tax_rule) VALUES (?, ?, ?, ?)');
     indianStates.forEach(st => {
-      const label = st === 'Maharashtra' ? 'SGST' : 'IGST';
-      const rule = st === 'Maharashtra' ? 'ADDED_TO_FEDERAL' : 'INSTEAD_OF_FEDERAL';
+      const isHome = st.toLowerCase() === homeState.toLowerCase();
+      const label = isHome ? 'SGST' : 'IGST';
+      const rule = isHome ? 'ADDED_TO_FEDERAL' : 'INSTEAD_OF_FEDERAL';
       stmt.run(st, 0, label, rule);
     });
   }

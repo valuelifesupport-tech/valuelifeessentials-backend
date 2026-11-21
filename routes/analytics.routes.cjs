@@ -3,9 +3,18 @@ const router = express.Router();
 const { db, executeMySQL } = require('../config/database.cjs');
 const { requireAdminAuth } = require('../middleware/auth.cjs');
 
+async function getStoreBaseState() {
+  let storeState = process.env.STORE_STATE || 'Telangana';
+  try {
+    const sRow = await executeMySQL('SELECT store_state FROM store_settings WHERE id = 1');
+    if (sRow && sRow[0] && sRow[0].store_state) storeState = sRow[0].store_state.trim();
+  } catch (e) {}
+  return storeState;
+}
+
 // Helper to compute tax metrics for a list of orders
-function computeOrderTaxMetrics(orders = []) {
-  const storeBaseState = 'maharashtra';
+function computeOrderTaxMetrics(orders = [], storeBaseState = (process.env.STORE_STATE || 'Telangana')) {
+  const cleanStoreState = String(storeBaseState || 'Telangana').trim().toLowerCase();
   const availableMonthsSet = new Set();
 
   let grossTaxCollected = 0;
@@ -44,7 +53,18 @@ function computeOrderTaxMetrics(orders = []) {
     }
 
     const stateName = (ord.shipping_state || ord.state_name || '').trim();
-    const isIntraState = !stateName || stateName.toLowerCase() === storeBaseState;
+    let cgst = Number(ord.cgst_amount || 0);
+    let sgst = Number(ord.sgst_amount || 0);
+    let igst = Number(ord.igst_amount || 0);
+
+    let isIntraState = false;
+    if (cgst > 0 || sgst > 0) {
+      isIntraState = true;
+    } else if (igst > 0) {
+      isIntraState = false;
+    } else {
+      isIntraState = !stateName || stateName.toLowerCase() === cleanStoreState;
+    }
 
     const totalAmount = Number(ord.total_amount || 0);
     const rawTax = Number(ord.tax_amount || ord.gst_amount || 0);
@@ -66,11 +86,6 @@ function computeOrderTaxMetrics(orders = []) {
     if (taxAmount === 0 && totalAmount > 0) {
       taxAmount = Math.round((totalAmount - taxableValue) * 100) / 100;
     }
-
-    // Split CGST, SGST, IGST
-    let cgst = Number(ord.cgst_amount || 0);
-    let sgst = Number(ord.sgst_amount || 0);
-    let igst = Number(ord.igst_amount || 0);
 
     if (cgst === 0 && sgst === 0 && igst === 0 && taxAmount > 0) {
       if (isIntraState) {
@@ -266,7 +281,8 @@ router.get('/api/admin/taxes/orders-ledger', requireAdminAuth, async (req, res) 
       } catch (e) {}
     }
 
-    const { orders, summary } = computeOrderTaxMetrics(rows || []);
+    const storeState = await getStoreBaseState();
+    const { orders, summary } = computeOrderTaxMetrics(rows || [], storeState);
 
     let filtered = orders;
 
@@ -297,7 +313,7 @@ router.get('/api/admin/taxes/orders-ledger', requireAdminAuth, async (req, res) 
     let effectiveSummary = summary;
     if (month && month !== 'ALL') {
       const monthOrders = orders.filter(o => o.month_key === month);
-      const recomputed = computeOrderTaxMetrics(monthOrders);
+      const recomputed = computeOrderTaxMetrics(monthOrders, storeState);
       effectiveSummary = { ...recomputed.summary, available_months: summary.available_months };
     }
 
@@ -322,11 +338,12 @@ router.get('/api/admin/gst-report/summary', requireAdminAuth, async (req, res) =
       } catch (e) {}
     }
 
-    const { summary, orders } = computeOrderTaxMetrics(rows || []);
+    const storeState = await getStoreBaseState();
+    const { summary, orders } = computeOrderTaxMetrics(rows || [], storeState);
 
     if (month && month !== 'ALL') {
       const monthOrders = orders.filter(o => o.month_key === month);
-      const monthCalc = computeOrderTaxMetrics(monthOrders);
+      const monthCalc = computeOrderTaxMetrics(monthOrders, storeState);
       return res.json({
         total_invoices: monthCalc.summary.total_invoices,
         totalGst: monthCalc.summary.net_tax_payable,
@@ -369,7 +386,8 @@ router.get(['/api/admin/gst-report/export', '/api/admin/gst-report/csv'], requir
       } catch (e) {}
     }
 
-    const { orders } = computeOrderTaxMetrics(rows || []);
+    const storeState = await getStoreBaseState();
+    const { orders } = computeOrderTaxMetrics(rows || [], storeState);
 
     let filtered = orders;
     if (month && month !== 'ALL') {
