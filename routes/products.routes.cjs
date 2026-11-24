@@ -341,12 +341,19 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
     const gst_percent = (rawGst !== undefined && rawGst !== null && rawGst !== '' && !isNaN(Number(rawGst))) ? Number(rawGst) : null;
     const hs_code = req.body.hs_code || req.body.hsn_code || '';
 
+    // SEO Metadata & Clean Slug Handle
+    const seo_title = req.body.seo_title !== undefined ? String(req.body.seo_title).trim() : null;
+    const seo_description = req.body.seo_description !== undefined ? String(req.body.seo_description).trim() : null;
+    const seo_keywords = req.body.seo_keywords !== undefined ? String(req.body.seo_keywords).trim() : null;
+
     if (!title || price_inr === undefined) {
       return res.status(400).json({ error: 'Title/name and price are required' });
     }
 
     let productSku = sku ? String(sku).trim().toUpperCase() : await generateUniqueSku('VL');
-    let slug = req.body.slug ? generateSlug(req.body.slug) : generateSlug(title);
+    const rawSlugInput = req.body.slug !== undefined ? req.body.slug : req.body.url_handle;
+    const cleanSlugInput = rawSlugInput ? String(rawSlugInput).replace(/^(https?:\/\/[^\/]+)?\/?(products\/)?/i, '').trim() : '';
+    let slug = cleanSlugInput ? generateSlug(cleanSlugInput) : generateSlug(title);
     let finalSlug = slug;
     let counter = 1;
 
@@ -358,21 +365,23 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
 
     const primaryImage = images.length > 0 ? images[0] : (req.body.image_url || null);
 
-    // Insert Product into MySQL (using correct column names)
+    // Insert Product into MySQL (including SEO fields)
     const myRes = await executeMySQL(
       `INSERT INTO products (
         title, slug, description, price_inr, price_usd,
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         sku, category_id, subcategory_id, stock, image_url,
         is_best_product, gst_percent, gst_rate, hs_code,
-        vendor, product_type, tags, weight, country_of_origin, barcode, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`,
+        vendor, product_type, tags, weight, country_of_origin, barcode, status,
+        seo_title, seo_description, seo_keywords
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?, ?)`,
       [
         title, finalSlug, description || '', price_inr, price_usd,
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         productSku, category_id || null, subcategory_id || null, stock, primaryImage,
         is_best_product ? 1 : 0, gst_percent, gst_percent, hs_code,
-        vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null
+        vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null,
+        seo_title, seo_description, seo_keywords
       ]
     );
     const newId = myRes ? myRes.insertId : Date.now();
@@ -384,13 +393,15 @@ router.post('/api/products', requireAdminAuth, async (req, res) => {
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         sku, category_id, subcategory_id, stock, image_url,
         is_best_product, gst_percent, gst_rate, hs_code,
-        vendor, product_type, tags, weight, country_of_origin, barcode, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')`).run(
+        vendor, product_type, tags, weight, country_of_origin, barcode, status,
+        seo_title, seo_description, seo_keywords
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?, ?)`).run(
         newId, title, finalSlug, description || '', price_inr, price_usd,
         compare_price_inr, compare_price_usd, cost_per_item_inr, cost_per_item_usd,
         productSku, category_id || null, subcategory_id || null, stock, primaryImage,
         is_best_product ? 1 : 0, gst_percent, gst_percent, hs_code,
-        vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null
+        vendor || 'VALUELIFE ESSENTIALS', product_type || '', tags || '', Number(weight) || 0.5, country_of_origin || 'India', barcode || null,
+        seo_title, seo_description, seo_keywords
       );
     } catch (e) {}
 
@@ -459,10 +470,24 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
 
     const primaryImage = (images && images.length > 0) ? images[0] : (req.body.image_url || undefined);
 
-    // Build slug if title changed
+    // SEO Metadata & Presence flags
+    const hasSeoTitle = req.body.seo_title !== undefined;
+    const seo_title = hasSeoTitle ? (req.body.seo_title ? String(req.body.seo_title).trim() : '') : null;
+
+    const hasSeoDesc = req.body.seo_description !== undefined;
+    const seo_description = hasSeoDesc ? (req.body.seo_description ? String(req.body.seo_description).trim() : '') : null;
+
+    const hasSeoKeywords = req.body.seo_keywords !== undefined;
+    const seo_keywords = hasSeoKeywords ? (req.body.seo_keywords ? String(req.body.seo_keywords).trim() : '') : null;
+
+    // Build slug from custom slug/url_handle or title
     let slug = undefined;
-    if (title) {
-      slug = req.body.slug ? generateSlug(req.body.slug) : generateSlug(title);
+    const rawSlugInput = req.body.slug !== undefined ? req.body.slug : req.body.url_handle;
+    if (rawSlugInput !== undefined && rawSlugInput !== null && String(rawSlugInput).trim() !== '') {
+      const cleanSlugInput = String(rawSlugInput).replace(/^(https?:\/\/[^\/]+)?\/?(products\/)?/i, '').trim();
+      slug = generateSlug(cleanSlugInput);
+    } else if (title) {
+      slug = generateSlug(title);
     }
 
     await executeMySQL(
@@ -478,7 +503,10 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
         gst_rate = CASE WHEN ? = 1 THEN ? ELSE gst_rate END,
         hs_code = COALESCE(?, hs_code),
         vendor = COALESCE(?, vendor), product_type = COALESCE(?, product_type), tags = COALESCE(?, tags),
-        weight = COALESCE(?, weight), country_of_origin = COALESCE(?, country_of_origin)
+        weight = COALESCE(?, weight), country_of_origin = COALESCE(?, country_of_origin),
+        seo_title = CASE WHEN ? = 1 THEN ? ELSE seo_title END,
+        seo_description = CASE WHEN ? = 1 THEN ? ELSE seo_description END,
+        seo_keywords = CASE WHEN ? = 1 THEN ? ELSE seo_keywords END
       WHERE id = ?`,
       [
         title, slug, description,
@@ -492,9 +520,49 @@ router.put('/api/products/:id', requireAdminAuth, async (req, res) => {
         hasGstField ? 1 : 0, resolvedGst,
         hs_code,
         vendor, product_type, tags,
-        weight ? Number(weight) : null, country_of_origin, id
+        weight ? Number(weight) : null, country_of_origin,
+        hasSeoTitle ? 1 : 0, seo_title,
+        hasSeoDesc ? 1 : 0, seo_description,
+        hasSeoKeywords ? 1 : 0, seo_keywords,
+        id
       ]
     );
+
+    // Sync to SQLite fallback
+    try {
+      db.prepare(
+        `UPDATE products SET
+          title = COALESCE(?, title), slug = COALESCE(?, slug), description = COALESCE(?, description),
+          price_inr = COALESCE(?, price_inr), price_usd = COALESCE(?, price_usd),
+          compare_price_inr = COALESCE(?, compare_price_inr), compare_price_usd = COALESCE(?, compare_price_usd),
+          cost_per_item_inr = COALESCE(?, cost_per_item_inr), cost_per_item_usd = COALESCE(?, cost_per_item_usd),
+          sku = COALESCE(?, sku), category_id = COALESCE(?, category_id), subcategory_id = COALESCE(?, subcategory_id),
+          stock = COALESCE(?, stock), image_url = COALESCE(?, image_url),
+          is_best_product = COALESCE(?, is_best_product),
+          hs_code = COALESCE(?, hs_code),
+          vendor = COALESCE(?, vendor), product_type = COALESCE(?, product_type), tags = COALESCE(?, tags),
+          weight = COALESCE(?, weight), country_of_origin = COALESCE(?, country_of_origin),
+          seo_title = CASE WHEN ? = 1 THEN ? ELSE seo_title END,
+          seo_description = CASE WHEN ? = 1 THEN ? ELSE seo_description END,
+          seo_keywords = CASE WHEN ? = 1 THEN ? ELSE seo_keywords END
+        WHERE id = ?`
+      ).run(
+        title, slug, description,
+        price_inr, price_usd,
+        compare_price_inr, compare_price_usd,
+        cost_per_item_inr, cost_per_item_usd,
+        sku, category_id, subcategory_id,
+        stock, primaryImage,
+        is_best_product !== undefined ? (is_best_product ? 1 : 0) : null,
+        hs_code,
+        vendor, product_type, tags,
+        weight ? Number(weight) : null, country_of_origin,
+        hasSeoTitle ? 1 : 0, seo_title,
+        hasSeoDesc ? 1 : 0, seo_description,
+        hasSeoKeywords ? 1 : 0, seo_keywords,
+        id
+      );
+    } catch (e) {}
 
     // Sync Images if provided
     if (Array.isArray(images)) {

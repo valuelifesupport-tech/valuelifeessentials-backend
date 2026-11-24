@@ -359,24 +359,46 @@ router.get('/api/admin/inquiries', requireAdminAuth, async (req, res) => {
   }
 });
 
+function generateSlug(text) {
+  return String(text || '').toLowerCase().trim()
+    .replace(/^(https?:\/\/[^\/]+)?\/?(pages\/)?/i, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-')
+    .replace(/(^-|-$)+/g, '');
+}
+
 // POST Create Custom Page
 router.post(['/api/admin/pages', '/api/pages'], requireAdminAuth, async (req, res) => {
   try {
-    const { title, slug, content, is_published = 1, meta_title, meta_description } = req.body;
+    const { title, slug, content } = req.body;
     if (!title || !slug) return res.status(400).json({ error: 'Title and slug are required' });
+
+    const cleanSlug = generateSlug(slug);
+    const is_published = req.body.status !== undefined 
+      ? (String(req.body.status).toUpperCase() === 'PUBLISHED' ? 1 : 0)
+      : (req.body.is_published !== undefined ? (req.body.is_published ? 1 : 0) : 1);
+
+    const seo_title = req.body.seo_title !== undefined 
+      ? String(req.body.seo_title).trim() 
+      : (req.body.meta_title !== undefined ? String(req.body.meta_title).trim() : '');
+
+    const seo_description = req.body.seo_description !== undefined 
+      ? String(req.body.seo_description).trim() 
+      : (req.body.meta_description !== undefined ? String(req.body.meta_description).trim() : '');
 
     const myRes = await executeMySQL(
       'INSERT INTO custom_pages (title, slug, content_html, is_published, seo_title, seo_description) VALUES (?, ?, ?, ?, ?, ?)',
-      [title, slug, content || '', is_published ? 1 : 0, meta_title || '', meta_description || '']
+      [title, cleanSlug, content || '', is_published, seo_title, seo_description]
     );
     const newId = myRes ? myRes.insertId : Date.now();
 
     try {
       db.prepare('INSERT OR REPLACE INTO custom_pages (id, title, slug, content, is_published, seo_title, seo_description) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(newId, title, slug, content || '', is_published ? 1 : 0, meta_title || '', meta_description || '');
+        .run(newId, title, cleanSlug, content || '', is_published, seo_title, seo_description);
     } catch (e) {}
 
-    res.json({ id: newId, title, slug, is_published });
+    res.json({ id: newId, title, slug: cleanSlug, is_published, seo_title, seo_description });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -386,19 +408,62 @@ router.post(['/api/admin/pages', '/api/pages'], requireAdminAuth, async (req, re
 router.put(['/api/admin/pages/:id', '/api/pages/:id'], requireAdminAuth, async (req, res) => {
   try {
     const id = req.params.id;
-    const { title, slug, content, is_published, meta_title, meta_description } = req.body;
+    const { title, slug, content } = req.body;
+
+    const is_published = req.body.status !== undefined 
+      ? (String(req.body.status).toUpperCase() === 'PUBLISHED' ? 1 : 0)
+      : (req.body.is_published !== undefined ? (req.body.is_published ? 1 : 0) : undefined);
+
+    const hasSeoTitle = req.body.seo_title !== undefined || req.body.meta_title !== undefined;
+    const seo_title = hasSeoTitle 
+      ? (req.body.seo_title !== undefined ? String(req.body.seo_title).trim() : String(req.body.meta_title || '').trim())
+      : null;
+
+    const hasSeoDesc = req.body.seo_description !== undefined || req.body.meta_description !== undefined;
+    const seo_description = hasSeoDesc 
+      ? (req.body.seo_description !== undefined ? String(req.body.seo_description).trim() : String(req.body.meta_description || '').trim())
+      : null;
+
+    const cleanSlug = slug !== undefined && slug !== null && String(slug).trim() !== '' ? generateSlug(slug) : undefined;
 
     await executeMySQL(
-      'UPDATE custom_pages SET title = COALESCE(?, title), slug = COALESCE(?, slug), content_html = COALESCE(?, content_html), is_published = COALESCE(?, is_published), seo_title = COALESCE(?, seo_title), seo_description = COALESCE(?, seo_description) WHERE id = ?',
-      [title, slug, content, is_published !== undefined ? (is_published ? 1 : 0) : null, meta_title, meta_description, id]
+      `UPDATE custom_pages SET
+        title = COALESCE(?, title),
+        slug = COALESCE(?, slug),
+        content_html = COALESCE(?, content_html),
+        is_published = COALESCE(?, is_published),
+        seo_title = CASE WHEN ? = 1 THEN ? ELSE seo_title END,
+        seo_description = CASE WHEN ? = 1 THEN ? ELSE seo_description END
+      WHERE id = ?`,
+      [
+        title, cleanSlug, content,
+        is_published !== undefined ? is_published : null,
+        hasSeoTitle ? 1 : 0, seo_title,
+        hasSeoDesc ? 1 : 0, seo_description,
+        id
+      ]
     );
 
     try {
-      db.prepare('UPDATE custom_pages SET title = COALESCE(?, title), slug = COALESCE(?, slug), content = COALESCE(?, content), is_published = COALESCE(?, is_published), seo_title = COALESCE(?, seo_title), seo_description = COALESCE(?, seo_description) WHERE id = ?')
-        .run(title, slug, content, is_published !== undefined ? (is_published ? 1 : 0) : null, meta_title, meta_description, id);
+      db.prepare(
+        `UPDATE custom_pages SET
+          title = COALESCE(?, title),
+          slug = COALESCE(?, slug),
+          content = COALESCE(?, content),
+          is_published = COALESCE(?, is_published),
+          seo_title = CASE WHEN ? = 1 THEN ? ELSE seo_title END,
+          seo_description = CASE WHEN ? = 1 THEN ? ELSE seo_description END
+        WHERE id = ?`
+      ).run(
+        title, cleanSlug, content,
+        is_published !== undefined ? is_published : null,
+        hasSeoTitle ? 1 : 0, seo_title,
+        hasSeoDesc ? 1 : 0, seo_description,
+        id
+      );
     } catch (e) {}
 
-    res.json({ success: true, id });
+    res.json({ success: true, id, message: 'Custom page updated successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
