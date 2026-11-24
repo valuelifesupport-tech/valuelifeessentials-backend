@@ -13,9 +13,17 @@ router.post('/api/shipping/shiprocket/check-serviceability', async (req, res) =>
       return res.status(400).json({ error: 'Valid 6-digit delivery pincode is required' });
     }
 
+    let effectivePickupPin = pickup_pincode;
+    if (!effectivePickupPin) {
+      try {
+        const sRows = await executeMySQL('SELECT pincode FROM store_settings WHERE id = 1');
+        if (sRows && sRows[0] && sRows[0].pincode) effectivePickupPin = sRows[0].pincode;
+      } catch (e) {}
+    }
+
     const result = await shiprocketService.checkServiceability({
       deliveryPincode: String(delivery_pincode).trim(),
-      pickupPincode: pickup_pincode,
+      pickupPincode: effectivePickupPin || '500011',
       weight,
       cod
     });
@@ -29,10 +37,14 @@ router.post('/api/shipping/shiprocket/check-serviceability', async (req, res) =>
 // 2. ADMIN/INTERNAL: CREATE SHIPMENT IN SHIPROCKET FOR AN ORDER
 router.post('/api/shipping/shiprocket/create-shipment', requireAdminAuth, async (req, res) => {
   try {
-    const { order_id, pickup_location = 'Primary' } = req.body;
+    const { order_id, pickup_location } = req.body;
     if (!order_id) {
       return res.status(400).json({ error: 'order_id is required' });
     }
+
+    const effectivePickupLocation = (pickup_location && String(pickup_location).trim()) 
+      ? String(pickup_location).trim() 
+      : (process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary');
 
     // Fetch order record
     const ordRows = await executeMySQL('SELECT * FROM orders WHERE id = ? OR order_number = ?', [order_id, order_id]);
@@ -53,7 +65,7 @@ router.post('/api/shipping/shiprocket/create-shipment', requireAdminAuth, async 
     const srResult = await shiprocketService.createOrder({
       order,
       items: items || [],
-      pickupLocation: pickup_location
+      pickupLocation: effectivePickupLocation
     });
 
     // Update orders table with Shiprocket identifiers
@@ -433,8 +445,43 @@ router.get('/api/shipping/shiprocket/channels', requireAdminAuth, async (req, re
 // 12. ADMIN: GET REGISTERED PICKUP ADDRESSES
 router.get('/api/shipping/shiprocket/pickup-addresses', requireAdminAuth, async (req, res) => {
   try {
-    const pickups = await shiprocketService.getPickupAddresses();
-    res.json(pickups);
+    let list = [];
+    try {
+      const pickups = await shiprocketService.getPickupAddresses();
+      list = pickups?.data?.shipping_address || pickups?.shipping_address || pickups?.data || [];
+      if (!Array.isArray(list)) list = [];
+    } catch (srErr) {
+      console.warn('Shiprocket pickup addresses API warning:', srErr.message);
+    }
+
+    // Always include store_settings warehouse address as fallback or reference
+    let storeInfo = null;
+    try {
+      const sRows = await executeMySQL('SELECT address_line1, address_line2, city, state, pincode, contact_phone, store_name FROM store_settings WHERE id = 1');
+      if (sRows && sRows[0]) storeInfo = sRows[0];
+    } catch (_) {}
+
+    if (list.length === 0 && storeInfo) {
+      list = [
+        {
+          pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary',
+          name: storeInfo.store_name || 'ValueLife Essentials',
+          address: storeInfo.address_line1 || 'Bowenpally',
+          address_2: storeInfo.address_line2 || '',
+          city: storeInfo.city || 'Hyderabad',
+          state: storeInfo.state || 'Telangana',
+          pin_code: storeInfo.pincode || '500011',
+          phone: storeInfo.contact_phone || '+91 78931 00755',
+          is_primary_location: 1
+        }
+      ];
+    }
+
+    res.json({
+      success: true,
+      pickup_addresses: list,
+      active_store_address: storeInfo
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

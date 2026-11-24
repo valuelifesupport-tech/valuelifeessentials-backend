@@ -11,7 +11,8 @@ class ShiprocketService {
   constructor() {
     this.email = process.env.SHIPROCKET_EMAIL || '';
     this.apiKey = process.env.SHIPROCKET_API_KEY || '';
-    this.defaultPickupPincode = process.env.SHIPROCKET_DEFAULT_PICKUP_PINCODE || '400001';
+    this.defaultPickupPincode = process.env.SHIPROCKET_DEFAULT_PICKUP_PINCODE || '500011';
+    this.defaultPickupLocation = process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary';
     this.channelId = process.env.SHIPROCKET_CHANNEL_ID || '';
   }
 
@@ -167,7 +168,7 @@ class ShiprocketService {
     const payload = {
       order_id: String(order.id || orderNumber),
       order_date: orderDate,
-      pickup_location: pickupLocation || 'Primary',
+      pickup_location: pickupLocation || this.defaultPickupLocation || 'Primary',
       channel_id: String(this.channelId || '12238334'),
       comment: order.order_notes || order.remark || 'ValueLife Organic Superstore Order',
       billing_customer_name: firstName,
